@@ -1,0 +1,17 @@
+# Core
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1
+pydantic>=2.6,<3
+sqlalchemy>=2.0,<3
+
+# OCR / CV
+paddlepaddle>=3.0,<4
+paddleocr>=2.9,<3
+opencv-python>=4.9,<5
+numpy>=1.26,<3
+
+# Frontend
+gradio>=5,<7
+
+# Tests
+pytest>=8,<9
