@@ -99,13 +99,15 @@ class TestDeclarationChecks:
         self.engine = LabelGuardEngine()
 
     def test_missing_mrp_fails(self):
+        """The rule itself fails on absence, but the fused decision routes to
+        a human: the MRP may sit on an uncaptured surface (PRD §14)."""
         fields = full_compliant_fields()
         fields["mrp"] = field(None)
         results = self.engine.evaluate(fields, GOOD_QUALITY)
         by_id = {r.rule_id: r for r in results}
         assert by_id["PC2011-R06-E-001"].status == "FAIL"
         decision = self.engine.fuse(results)
-        assert decision.decision == "NON_COMPLIANT"
+        assert decision.decision == "MANUAL_REVIEW"
         assert "PC2011-R06-E-001" in decision.failed_rules
 
     def test_missing_mrp_bad_image_review(self):
@@ -114,6 +116,22 @@ class TestDeclarationChecks:
         results = self.engine.evaluate(fields, BAD_QUALITY)
         by_id = {r.rule_id: r for r in results}
         assert by_id["PC2011-R06-E-001"].status == "MANUAL_REVIEW"
+
+    def test_more_than_five_missing_declarations_rejects(self):
+        fields = full_compliant_fields()
+        for name in (
+            "mrp",
+            "product_name",
+            "net_quantity",
+            "manufacturer",
+            "manufacturing_date",
+            "consumer_care",
+        ):
+            fields[name] = field(None)
+        results = self.engine.evaluate(fields, GOOD_QUALITY)
+        decision = self.engine.fuse(results)
+        assert decision.decision == "NON_COMPLIANT"
+        assert "exceeding the review threshold of 5" in decision.reasons[0]
 
     def test_pointer_softens_mrp_absence(self):
         fields = full_compliant_fields()
@@ -263,12 +281,19 @@ class TestAggregateAndVerification:
         self.engine = LabelGuardEngine()
 
     def test_aggregate_rule4_follows_declaration_rules(self):
+        """With only absence-based child fails, Rule 4 itself stays a manual
+        review - "possibly on an uncaptured surface" (PRD §14)."""
         fields = full_compliant_fields()
         fields["mrp"] = field(None)
         results = self.engine.evaluate(fields, GOOD_QUALITY)
+        by_id = {r.rule_id: r for r in results}
+        assert "PC2011-R06-E-001" in [
+            r.rule_id for r in results if r.status == "FAIL"
+        ]
+        assert by_id["PC2011-R04-001"].status == "MANUAL_REVIEW"
         decision = self.engine.fuse(results)
         assert "PC2011-R06-E-001" in decision.failed_rules
-        assert "PC2011-R04-001" in decision.failed_rules
+        assert decision.decision == "MANUAL_REVIEW"
 
     def test_enforce_verification_blocks_unverified_rules(self):
         unverified_rules = [dict(r, verified=False) for r in self.engine.rules]

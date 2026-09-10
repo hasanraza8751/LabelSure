@@ -434,3 +434,90 @@ class TestEntityIsNotACommodityName:
             ["ABC Foods Pvt. Ltd.", "Crispy Potato Wafers", "Net Qty: 100 g"]
         )
         assert fields["product_name"].value == "Crispy Potato Wafers"
+
+
+# ---------------------------------------------------------------------------
+# New tests: extraction_status field and price-cue guards
+# ---------------------------------------------------------------------------
+
+class TestExtractionStatusField:
+    """Verify that extraction_status is set correctly on ExtractedField objects."""
+
+    def setup_method(self):
+        self.extractor = FieldExtractor()
+
+    def _bbox(self, i):
+        return [[10, i * 50], [200, i * 50], [200, i * 50 + 40], [10, i * 50 + 40]]
+
+    def test_mrp_found_status_high_confidence(self):
+        """MRP with explicit keyword and high confidence → extraction_status=FOUND."""
+        texts = ["MRP ₹45.00"]
+        confs = [0.95]
+        bboxes = [self._bbox(0)]
+        result = self.extractor._extract_mrp(texts, confs, bboxes)
+        assert result.extraction_status == "FOUND"
+
+    def test_mrp_not_found_status(self):
+        """No MRP on label → extraction_status=NOT_FOUND."""
+        texts = ["Net Wt: 200g", "Product Name: Biscuits"]
+        confs = [0.97, 0.97]
+        bboxes = [self._bbox(i) for i in range(2)]
+        result = self.extractor._extract_mrp(texts, confs, bboxes)
+        assert result.extraction_status == "NOT_FOUND"
+
+    def test_mrp_unreadable_status_low_conf_price_cue(self):
+        """Price cue present but confidence below threshold → UNREADABLE."""
+        texts = ["MRP: ₹"]  # cue present, value mangled
+        confs = [0.35]
+        bboxes = [self._bbox(0)]
+        result = self.extractor._extract_mrp(texts, confs, bboxes)
+        # With a price cue but value unreadable, must be UNREADABLE or NOT_FOUND
+        assert result.extraction_status in ("UNREADABLE", "NOT_FOUND")
+        assert result.value is None
+
+    def test_all_extract_all_fields_have_extraction_status(self):
+        """extract_all must set extraction_status on every returned field."""
+        texts = [
+            "CRISPY BISCUITS",
+            "MRP: Rs. 25.00",
+            "Net Wt. 200g",
+            "Mfg by: ABC Foods Pvt Ltd",
+            "MFG Date: 01/2025",
+            "Customer Care: 1800-100-200",
+            "Country of Origin: India",
+        ]
+        confs = [0.97] * len(texts)
+        bboxes = [self._bbox(i) for i in range(len(texts))]
+        fields = self.extractor.extract_all(texts, confs, bboxes)
+        valid_statuses = {"FOUND", "FOUND_LOW_CONFIDENCE", "NOT_FOUND", "UNREADABLE", "AMBIGUOUS"}
+        for field_name, field in fields.items():
+            assert hasattr(field, "extraction_status"), (
+                f"Field '{field_name}' missing extraction_status"
+            )
+            assert field.extraction_status in valid_statuses, (
+                f"Field '{field_name}' has invalid status: {field.extraction_status!r}"
+            )
+
+    def test_mrp_requires_price_cue_keyword(self):
+        """A number without any MRP/₹/Rs keyword must never be extracted as MRP."""
+        texts = [
+            "Product: Biscuits",
+            "120",          # plausible price but NO price-cue keyword
+            "Net Wt: 200g",
+        ]
+        confs = [0.97, 0.97, 0.97]
+        bboxes = [self._bbox(i) for i in range(3)]
+        result = self.extractor._extract_mrp(texts, confs, bboxes)
+        assert result.value is None, (
+            f"Bare number '120' with no price-cue keyword must NOT be MRP. Got: {result.value}"
+        )
+        assert result.extraction_status == "NOT_FOUND"
+
+    def test_mrp_found_low_confidence_on_adjacent_line(self):
+        """MRP found via adjacent-line strategy → extraction_status FOUND_LOW_CONFIDENCE."""
+        texts = ["M.R.P.", "Rs. 30"]  # keyword on line 0, value on line 1
+        confs = [0.88, 0.88]
+        bboxes = [self._bbox(i) for i in range(2)]
+        result = self.extractor._extract_mrp(texts, confs, bboxes)
+        assert result.value is not None
+        assert result.extraction_status in ("FOUND", "FOUND_LOW_CONFIDENCE")

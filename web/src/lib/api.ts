@@ -15,13 +15,13 @@ import type {
   ChatTurn,
   CorpusDocument,
   CorpusStats,
+  FieldCorrection,
   HealthResponse,
   Inspection,
   InspectionSummary,
   RagAnswer,
   RagStatus,
   RegulationSearchResponse,
-  ReviewQueueEntry,
   Stats,
   ViolationRow,
 } from "@/lib/types"
@@ -106,10 +106,23 @@ export const api = {
     request<{ count: number; inspections: InspectionSummary[] }>(
       `/inspections?limit=${limit}`,
     ),
-  searchInspections(params: { product?: string; decision?: string; limit?: number }) {
+  searchInspections(params: {
+    product?: string
+    manufacturer?: string
+    /** The AI decision to match - sent as the backend's `status` query param. */
+    decision?: string
+    inspector_status?: string
+    category?: string
+    violation_rule_id?: string
+    limit?: number
+  }) {
     const query = new URLSearchParams()
     if (params.product) query.set("product", params.product)
-    if (params.decision) query.set("decision", params.decision)
+    if (params.manufacturer) query.set("manufacturer", params.manufacturer)
+    if (params.decision) query.set("status", params.decision)
+    if (params.inspector_status) query.set("inspector_status", params.inspector_status)
+    if (params.category) query.set("category", params.category)
+    if (params.violation_rule_id) query.set("violation_rule_id", params.violation_rule_id)
     query.set("limit", String(params.limit ?? 50))
     return request<{ count: number; inspections: InspectionSummary[] }>(
       `/inspections/search?${query}`,
@@ -138,9 +151,57 @@ export const api = {
       body: JSON.stringify(body),
     })
   },
-  reviewQueue: (limit = 50) =>
-    request<{ count: number; queue: ReviewQueueEntry[] }>(
-      `/review-queue?limit=${limit}`,
+  /** The current human verdict, or 404 when not yet signed off. */
+  getDecision: (id: string) =>
+    request<{ decision: { [key: string]: unknown } }>(`/inspections/${id}/decision`),
+  /** Whether SMTP delivery is configured, for the email card. */
+  mailStatus: () => request<{ configured: boolean; host: string | null; port: number; user: string | null }>(
+    "/mail/status",
+  ),
+  /** Email the PDF report; allowed only after an inspector marked it compliant. */
+  emailReport: (id: string, body: { to: string; note?: string }) =>
+    request<{ sent: boolean; to: string; message: string }>(`/inspections/${id}/email`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // --- per-rule inspector notes -------------------------------------------
+  saveRuleNotes: (
+    id: string,
+    body: {
+      notes: { rule_id: string; inspector_status: string; note?: string; rule_reference?: string; ai_status?: string }[]
+      inspector_id?: string
+    },
+  ) =>
+    request<Record<string, unknown>>(`/inspections/${id}/rule-notes`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getRuleNotes: (id: string) =>
+    request<{ notes: { rule_id: string; inspector_status: string; note: string; rule_reference: string; ai_status: string }[] }>(
+      `/inspections/${id}/rule-notes`,
+    ),
+
+  // --- inspector field corrections ----------------------------------------
+  saveFieldCorrections: (
+    id: string,
+    body: {
+      corrections: {
+        field_name: string
+        original_value?: unknown
+        corrected_value: unknown
+        reason?: string
+      }[]
+      inspector_id?: string
+    },
+  ) =>
+    request<Record<string, unknown>>(`/inspections/${id}/field-corrections`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getFieldCorrections: (id: string) =>
+    request<{ corrections: FieldCorrection[] }>(
+      `/inspections/${id}/field-corrections`,
     ),
 
   // --- regulations --------------------------------------------------------

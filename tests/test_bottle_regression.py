@@ -255,9 +255,10 @@ class TestBottleRuleDecisions:
         assert fields["manufacturing_date"]["value"] is None
 
     def test_commodity_name_is_the_honest_fail(self):
-        """No commodity name on neck/label surfaces (it is on the uncaptured
-        front brand panel) - the one honest FAIL, mirrored by the Rule 4
-        aggregate."""
+        """No commodity name captured, but the uncaptured front brand panel
+        may carry it - the absence fail routes the whole screening to a human
+        (PRD §14: absence from captured surfaces alone is not a verdict)."""
         by_id, decision = self._evaluate()
-        assert decision.failed_rules == ["PC2011-R06-B-001", "PC2011-R04-001"]
-        assert decision.decision == "NON_COMPLIANT"
+        assert decision.failed_rules == ["PC2011-R06-B-001"]
+        assert decision.decision == "MANUAL_REVIEW"
+        assert any("absence" in r.lower() for r in decision.reasons)

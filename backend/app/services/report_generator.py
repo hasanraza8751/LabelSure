@@ -106,6 +106,38 @@ class ReportGenerator:
                 lines.append(f"- {reason}")
             lines.append("")
 
+        # AI Final Decision (schema 1.2)
+        ai = result.get("ai") or {}
+        ai_status = ai.get("status", "skipped")
+        adjudication = ai.get("adjudication") or {}
+        lines.append("## AI Final Decision")
+        lines.append("")
+        if ai_status == "ok" and adjudication.get("verdict"):
+            verdict = adjudication["verdict"]
+            ai_conf = adjudication.get("confidence")
+            ai_conf_str = f"{float(ai_conf):.0%}" if isinstance(ai_conf, (int, float)) else "n/a"
+            explanation = (adjudication.get("explanation") or "").strip()
+            lines.append(f"**Verdict:** {verdict.replace('_', ' ')}  ")
+            lines.append(f"**AI Confidence:** {ai_conf_str}  ")
+            if explanation:
+                lines.append(f"**Explanation:** {explanation}")
+            overrides = adjudication.get("overrides") or {}
+            if overrides:
+                lines.append("")
+                lines.append("**Per-rule AI overrides:**")
+                for rule_id, override in overrides.items():
+                    lines.append(f"- `{rule_id}`: {override}")
+        elif ai_status == "verified_only":
+            lines.append(
+                "*AI field verification was run but adjudication was unavailable. "
+                "Field corrections (if any) were fed back into the rule engine — "
+                "the deterministic verdict above stands.*"
+            )
+        else:
+            reason = ai.get("reason") or "AI adjudication was not invoked."
+            lines.append(f"*Deterministic result only — {reason}*")
+        lines.append("")
+
         # Compliance score (PRD 26)
         score_block = result.get("compliance_score") or {}
         if score_block.get("score") is not None:
@@ -155,6 +187,42 @@ class ReportGenerator:
                 f"| {label} | {value_str} | {conf_cell} | {level} | {source} |"
             )
         lines.append("")
+
+        # AI Evidence Verification (schema 1.2) - shown when AI ran corrections
+        ai = result.get("ai") or {}
+        ai_verification = ai.get("verification") or {}
+        if ai_verification:
+            lines.append("## AI Evidence Verification")
+            lines.append("")
+            lines.append(
+                "The AI visually inspected the original images and compared them to the "
+                "OCR extraction. Fields where the AI's assessment differed from OCR are shown below."
+            )
+            lines.append("")
+            lines.append("| Field | AI Status | AI Value | Source Image | AI Reason |")
+            lines.append("|---|---|---|---|---|")
+            for fname, entry in ai_verification.items():
+                label = FIELD_LABELS.get(fname, fname)
+                ai_status = entry.get("status", "—")
+                ai_val = entry.get("value") or "—"
+                ai_src = entry.get("source_image") or "—"
+                ai_reason = (entry.get("reason") or "—")[:80]
+                lines.append(f"| {label} | {ai_status} | {ai_val} | {ai_src} | {ai_reason} |")
+            lines.append("")
+            if ai.get("status") == "ok":
+                lines.append(
+                    "*These corrections were fed back through the deterministic rule engine — "
+                    "the rule results below reflect the AI-corrected evidence.*"
+                )
+                lines.append("")
+            # Show original deterministic results if available
+            det_results = result.get("rule_results_deterministic") or []
+            if det_results:
+                lines.append(
+                    "> **Note:** Deterministic rule results (before AI correction) are preserved "
+                    "in the `rule_results_deterministic` field for audit purposes."
+                )
+                lines.append("")
 
         # Compliance findings
         lines.append("## Compliance Findings")
@@ -212,9 +280,48 @@ class ReportGenerator:
                 lines.append(f"**Evidence:** {'; '.join(ev_parts)}")
             lines.append("")
 
-        # Targeted review actions - tell the reviewer exactly where to look
+        # Human Review Required — only shown when decision == MANUAL_REVIEW
+        # Each item carries exact image / region / field / reason instructions
         actions = result.get("review_actions") or []
-        if actions:
+        decision = result.get("decision", "")
+        if actions and decision == "MANUAL_REVIEW":
+            lines.append("## Human Review Required")
+            lines.append("")
+            lines.append(
+                f"> ⚠️ **{len(actions)} item(s) require inspector verification.** "
+                "Each entry below specifies the exact surface, region, and field to check "
+                "so you can resolve only the uncertain part — not re-inspect the whole package."
+            )
+            lines.append("")
+            for idx, a in enumerate(actions, 1):
+                field_label = a.get("field_label", a.get("field", "Unknown field"))
+                surface = a.get("source_image") or "unknown surface"
+                location = a.get("check_location") or "package label"
+                reason = a.get("reason") or "—"
+                rule_ref = a.get("rule_reference") or a.get("rule_id") or "—"
+                conf = a.get("confidence")
+                conf_str = f"{conf:.0%}" if isinstance(conf, (int, float)) else "n/a"
+                current_val = a.get("current_value")
+                severity = a.get("severity", "MEDIUM")
+
+                lines.append(f"### {idx}. {field_label}")
+                lines.append("")
+                lines.append(
+                    f"**Action:** Inspect **{surface}** → **{location}** → verify **{field_label}**"
+                )
+                lines.append("")
+                lines.append(f"**Why:** {reason}")
+                if current_val:
+                    lines.append(
+                        f"**Current OCR reading:** `{current_val}` (evidence confidence: {conf_str})"
+                    )
+                else:
+                    lines.append(f"**Evidence confidence:** {conf_str} (insufficient for auto-verdict)")
+                lines.append(f"**Rule:** {rule_ref} (severity: {severity})")
+                lines.append("")
+
+        elif actions:
+            # Decision is not MANUAL_REVIEW but there are review actions (rare — show compact)
             lines.append("## Targeted Review Actions")
             lines.append("")
             lines.append(

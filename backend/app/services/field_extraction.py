@@ -14,6 +14,11 @@ class ExtractedField:
     bbox: List[List[int]]
     reason: str
     line_index: int
+    # OCR readability status for this field — set by each extractor so the
+    # rule engine and AI stage can distinguish a genuinely absent declaration
+    # from one that was present but unreadable.
+    # Values: FOUND | FOUND_LOW_CONFIDENCE | NOT_FOUND | UNREADABLE | AMBIGUOUS
+    extraction_status: str = "NOT_FOUND"
 
 class FieldExtractor:
     """Robust field extraction from PaddleOCR results with context awareness."""
@@ -115,7 +120,14 @@ class FieldExtractor:
     
     def _extract_mrp(self, texts: List[str], confidences: List[float], 
                      bboxes: List[List[List[int]]]) -> ExtractedField:
-        """Extract MRP with robust pattern matching and false-positive rejection."""
+        """Extract MRP with robust pattern matching and false-positive rejection.
+
+        CRITICAL GUARD: A number is NEVER accepted as MRP unless an explicit
+        price-cue keyword (MRP / M.R.P. / Maximum Retail Price / Price / ₹ / Rs)
+        is present on the same line or within 2 adjacent lines. Batch numbers,
+        lot codes, phone numbers, FSSAI numbers and nutrition values are
+        systematically rejected.
+        """
         
         mrp_patterns = [
             r'\bm\.?r\.?p\.?\b',
@@ -123,6 +135,13 @@ class FieldExtractor:
             r'\bunit\s*selling\s*price\b',
             r'\bmax\.?\s*retail\s*pr\b',
         ]
+
+        # The price-cue keyword set — a NUMBER must appear near one of these
+        PRICE_CUE_RE = re.compile(
+            r'\bm\.?r\.?p\.?\b|\bmax\.?\s*retail\s*price\b|\bprice\b|'
+            r'₹|rs\.?|inr\b|\bunit\s*sale\b|\binclusive\s*of\s*all\s*taxes\b',
+            re.IGNORECASE,
+        )
         
         price_value_pattern = re.compile(
             r'(?:rs\.?|₹|inr)?\s*[\.:]?\s*(\d{1,5}(?:\.\d{1,2})?)',
@@ -150,6 +169,13 @@ class FieldExtractor:
                 return True
             except ValueError:
                 return False
+
+        def window_has_price_cue(center_idx: int, window: int = 2) -> bool:
+            """True if any line within `window` lines of center_idx contains a price cue."""
+            for k in range(max(0, center_idx - window), min(len(texts), center_idx + window + 1)):
+                if PRICE_CUE_RE.search(texts[k]):
+                    return True
+            return False
         
         # Strategy 1: Find MRP keyword and extract value from same or adjacent lines
         for i, text in enumerate(texts):
@@ -162,17 +188,19 @@ class FieldExtractor:
                     currency = '₹'
                     if re.search(r'rs\.?', text, re.IGNORECASE):
                         currency = 'Rs.'
-                    
+                    conf_level = 'HIGH' if confidences[i] >= 0.90 else 'MEDIUM'
+                    status = 'FOUND' if confidences[i] >= 0.90 else 'FOUND_LOW_CONFIDENCE'
                     return ExtractedField(
                         field_name='mrp',
                         value=f"{currency}{val}",
                         ocr_text=text,
                         ocr_confidence=confidences[i],
                         extraction_confidence=min(confidences[i], 0.95),
-                        confidence_level='HIGH',
+                        confidence_level=conf_level,
                         bbox=bboxes[i],
                         reason=f"Price value '{val}' found on MRP declaration line",
-                        line_index=i
+                        line_index=i,
+                        extraction_status=status,
                     )
                 
                 # Try adjacent lines (within 2 lines)
@@ -199,7 +227,8 @@ class FieldExtractor:
                             confidence_level='MEDIUM',
                             bbox=bboxes[i],
                             reason=f"Price value '{val}' found near MRP keyword (line {j})",
-                            line_index=i
+                            line_index=i,
+                            extraction_status='FOUND_LOW_CONFIDENCE',
                         )
         
         # Strategy 2: Look for "(Inclusive of all taxes)" / "unit sale" fragments
@@ -207,6 +236,9 @@ class FieldExtractor:
         for i, text in enumerate(texts):
             if re.search(r'(inclusive of all taxes|incl\.?\s*of\s*all taxes|\(incl\b|unit\s*sale|all\s*taxes\b)', text, re.IGNORECASE):
                 for j in range(max(0, i-3), min(len(texts), i+3)):
+                    # CRITICAL: Only accept if a price cue also exists in this window
+                    if not window_has_price_cue(j, window=2):
+                        continue
                     match = price_value_pattern.search(texts[j])
                     if match and is_valid_mrp_value(match.group(1), texts[j]):
                         val = match.group(1)
@@ -219,7 +251,8 @@ class FieldExtractor:
                             confidence_level='MEDIUM',
                             bbox=bboxes[j],
                             reason=f"Price '{val}' found near tax-inclusive declaration",
-                            line_index=j
+                            line_index=j,
+                            extraction_status='FOUND_LOW_CONFIDENCE',
                         )
         
         # Strategy 3: Detect unusual format like ".20.00" attached to MRP text
@@ -238,8 +271,25 @@ class FieldExtractor:
                         confidence_level='MEDIUM',
                         bbox=bboxes[i],
                         reason=f"Price '{val}' extracted from MRP line with unusual formatting",
-                        line_index=i
+                        line_index=i,
+                        extraction_status='FOUND_LOW_CONFIDENCE',
                     )
+
+        # Check if any line has a price cue with a number nearby but low confidence OCR
+        for i, text in enumerate(texts):
+            if PRICE_CUE_RE.search(text) and confidences[i] < 0.65:
+                return ExtractedField(
+                    field_name='mrp',
+                    value=None,
+                    ocr_text=text,
+                    ocr_confidence=confidences[i],
+                    extraction_confidence=0.0,
+                    confidence_level='MISSING',
+                    bbox=bboxes[i],
+                    reason=f"Price cue keyword detected but OCR confidence too low to read value (conf={confidences[i]:.2f}) — verify on original image",
+                    line_index=i,
+                    extraction_status='UNREADABLE',
+                )
         
         return ExtractedField(
             field_name='mrp',
@@ -250,7 +300,8 @@ class FieldExtractor:
             confidence_level='MISSING',
             bbox=[],
             reason="No MRP declaration found or all candidates rejected as false positives",
-            line_index=-1
+            line_index=-1,
+            extraction_status='NOT_FOUND',
         )
     
     def _extract_product_name(self, texts: List[str], confidences: List[float],

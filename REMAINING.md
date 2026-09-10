@@ -16,6 +16,150 @@ previous revision of this document.
 > than quietly edited away. A document that only ever reports success is not
 > worth reading.
 
+## One-Day Priority
+
+## Submission Readiness
+
+**Verdict: good enough for an MVP judging demo, but not yet absolute eye candy.**
+The product story is strong and the core workflow is complete: image capture,
+quality gating, OCR, structured extraction, deterministic legal rules, AI
+revalidation, evidence, scoring, human review and reporting. The system is
+also appropriately conservative: it does not present the AI as an autonomous
+legal decision-maker.
+
+For the final presentation, prioritize polish over new backend features:
+
+1. Make the inspection screen the obvious hero workflow: one clear upload
+   action, immediate image previews, a visible scan state, and one prominent
+   final verdict.
+2. Present the result as a compact three-step story: **What was read → What
+   the rules found → What the inspector should do**. Keep raw OCR and advanced
+   regulation tools behind expandable sections.
+3. Use the existing evidence images and rule citations as the visual proof;
+   avoid adding decorative cards or dense dashboard widgets that do not help
+   an inspector decide.
+4. Demo three outcomes deliberately: a clean `COMPLIANT` package, a clear
+   `NON_COMPLIANT` package, and an uncertain package routed to
+   `MANUAL_REVIEW`.
+
+The remaining technical risks are real but acceptable for an MVP if disclosed:
+processing is slower than the PRD target, populated fields can carry stale
+`NOT_FOUND` metadata, and the React frontend has no automated test suite. Do
+not claim production readiness until those are corrected.
+
+The immediate decision policy is now:
+
+- **0–5 unique missing declarations:** `MANUAL_REVIEW`; the package may need
+   another surface or an inspector check.
+- **6+ unique missing declarations:** `NON_COMPLIANT`; the number of missing
+   mandatory declarations exceeds the review threshold.
+- **Definitive content violations:** `NON_COMPLIANT` regardless of the count.
+
+The threshold is implemented in `LabelGuardEngine` with a default of five and
+is covered by the focused rule-engine tests. The primary navigation includes
+**Inspect**, **Ask the rules**, **Regulations** and **Dashboard**.
+
+Remaining before submission:
+
+1. Add one complete package image that produces a confident `COMPLIANT` result.
+2. Fix the response metadata inconsistency where populated fields can still
+    report `extraction_status: NOT_FOUND`.
+3. Show the missing-declaration threshold in the inspection result and report.
+4. Profile and reduce the current ~50–65 second image-processing time.
+5. **Complete the email workflow:** the inspector must enter a recipient email
+    during sign-off, and the final PDF report must be sent after either a
+    `COMPLIANT` or `NON_COMPLIANT` inspector decision. The current backend
+    permits email only for `COMPLIANT`, although the UI already has recipient
+    fields and SMTP support.
+
+### Email Workflow Acceptance Criteria
+
+- Show a validated recipient-email field in the inspector sign-off action.
+- Require inspector sign-off before sending; never email an unreviewed result.
+- Permit sending for both final pass and final fail decisions.
+- Include the final inspector decision, automated decision, evidence and rule
+   explanations in the attached PDF.
+- Report SMTP failures clearly and keep the sign-off recorded if delivery
+   fails, so the inspector can retry.
+
+## PRD Gaps
+
+The following items are not fully aligned with the PRD and should remain
+visible rather than being described as complete:
+
+### Submission-Critical
+
+- **Performance:** the PRD target is under five seconds per image; current
+   processing is approximately 50–65 seconds.
+- **Route protection:** inspection submission and review routes use the custom
+   auth dependency, but some inspection history, regulation, and RAG read
+   routes are not consistently protected when authentication is enabled.
+- **Extraction precision:** OCR can associate nutrition values, addresses, or
+   unrelated text with quantity, brand, or manufacturer fields.
+- **Clean PASS path:** the final demo still needs one complete package image
+   that produces a confident `COMPLIANT` result.
+
+### Acceptable MVP Deviations
+
+- **Frontend stack:** the PRD names Next.js; the implementation uses React,
+   Vite, Tailwind and shadcn/ui.
+- **Database default:** the PRD names PostgreSQL; SQLite remains the default,
+   although PostgreSQL compatibility has been verified.
+- **RAG vectors:** retrieval uses lexical vectors and hybrid ranking rather
+   than neural embeddings.
+- **Frontend tests:** the React frontend has no automated test suite yet.
+- **Schema documentation:** some tests or documents still expect response
+   schema `1.1`; current responses use `1.2`.
+- **Ruleset provenance:** rules are marked verified, but the system does not
+   record who checked each rule against the Gazette or when.
+- **Regulatory corpus:** one amendment citation for consumer-care requirements
+   still needs confirmation against the official source.
+
+These deviations do not invalidate the MVP demo, but they should be disclosed
+before claiming production readiness.
+
+## How to Resolve the Gaps
+
+Use the following order after the demo deadline:
+
+1. **Performance:** add stage timing around quality assessment, PaddleOCR,
+   extraction, AI verification and report generation. Cache the OCR model,
+   resize oversized inputs before OCR, avoid repeated OCR across surfaces, and
+   run independent surfaces concurrently. Re-measure against the five-second
+   target after each change.
+2. **Route protection:** apply `auth.require_role(...)` to inspection history,
+   inspection detail, report/evidence, regulations and RAG endpoints. Keep
+   `/health` and `/auth/status` public. Add tests for anonymous, inspector,
+   supervisor and admin access to every route family.
+3. **Extraction precision:** require field labels or strong nearby evidence,
+   reject nutrition-table context before accepting quantity values, and lower
+   confidence instead of assigning unrelated text. Add regression fixtures for
+   the false brand, quantity and manufacturer matches found in the real-image
+   batch.
+4. **Metadata consistency:** centralize serialization of extracted fields so a
+   non-empty value always receives `FOUND` (or `MANUAL_REVIEW` when uncertain),
+   and `NOT_FOUND` is reserved for a null value. Add a schema-level test for
+   every declared field.
+5. **Clean PASS demonstration:** use a complete front-and-back package image,
+   verify every mandatory field manually, and keep the fixture in the PRD
+   scenario tests so the demo result cannot regress.
+6. **Frontend tests:** add smoke tests for upload, loading, result verdict,
+   evidence display and sign-off. Use the existing API fixtures so tests do not
+   invoke OCR or paid AI services.
+7. **Schema consistency:** choose `labelguard-inspection/1.2` as the current
+   contract, update stale tests/docs, and add a compatibility note if older
+   stored inspections still use `1.1`.
+8. **Ruleset provenance:** add `verified_by`, `verified_at` and source URL or
+   Gazette reference to the ruleset metadata. Do not mark a rule verified until
+   that audit record exists.
+9. **Citation correction:** compare the disputed amendment chunk with the
+   official Gazette text, then either correct its rule reference or mark the
+   chunk unverified and route affected findings to manual review.
+10. **Technology deviations:** retain React/Vite, SQLite and lexical retrieval
+    for this internal MVP unless the deployment genuinely needs Next.js,
+    PostgreSQL-only operation or neural semantic search. These are migration
+    projects, not one-day fixes, and should not be rushed before judging.
+
 ---
 
 ## Corrections to the 2026-09-07 revision

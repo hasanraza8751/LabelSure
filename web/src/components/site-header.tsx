@@ -12,7 +12,6 @@ const NAV = [
   { to: "/inspect", label: "Inspect" },
   { to: "/ask", label: "Ask the rules" },
   { to: "/regulations", label: "Regulations" },
-  { to: "/queue", label: "Review queue" },
   { to: "/dashboard", label: "Dashboard" },
 ]
 

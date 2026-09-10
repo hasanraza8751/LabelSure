@@ -175,6 +175,70 @@ class AuditLogRow(Base):
         }
 
 
+class InspectorRuleNoteRow(Base):
+    """Per-rule inspector notes (PRD §21).
+
+    An inspector can record a manual finding on each individual rule,
+    overriding the AI's pass/fail/review for that rule specifically.
+    """
+
+    __tablename__ = "inspector_rule_notes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    inspection_id = Column(String, index=True, nullable=False)
+    inspector_id = Column(String, index=True, nullable=False)
+    rule_id = Column(String, index=True, nullable=False)
+    rule_reference = Column(String)
+    ai_status = Column(String)  # PASS / FAIL / MANUAL_REVIEW / NOT_APPLICABLE
+    inspector_status = Column(String)  # PASS / FAIL / MANUAL_REVIEW
+    note = Column(Text)
+    timestamp = Column(String, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "inspection_id": self.inspection_id,
+            "inspector_id": self.inspector_id,
+            "rule_id": self.rule_id,
+            "rule_reference": self.rule_reference,
+            "ai_status": self.ai_status,
+            "inspector_status": self.inspector_status,
+            "note": self.note,
+            "timestamp": self.timestamp,
+        }
+
+
+class InspectorFieldCorrectionRow(Base):
+    """Inspector-corrected extracted values (PRD §21).
+
+    The AI payload is immutable; a correction is stored alongside it so the
+    original reading and the human's reading remain distinguishable.
+    """
+
+    __tablename__ = "inspector_field_corrections"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    inspection_id = Column(String, index=True, nullable=False)
+    inspector_id = Column(String, index=True, nullable=False)
+    field_name = Column(String, index=True, nullable=False)
+    original_value = Column(String)
+    corrected_value = Column(String, nullable=False)
+    reason = Column(Text)
+    timestamp = Column(String, nullable=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "inspection_id": self.inspection_id,
+            "inspector_id": self.inspector_id,
+            "field_name": self.field_name,
+            "original_value": self.original_value,
+            "corrected_value": self.corrected_value,
+            "reason": self.reason,
+            "timestamp": self.timestamp,
+        }
+
+
 class UserRow(Base):
     """Local user account (PRD §30). Password is stored as a PBKDF2 hash."""
 
@@ -715,6 +779,117 @@ def get_decision_history(inspection_id: str) -> List[Dict[str, Any]]:
                 session.query(InspectorDecisionRow)
                 .filter(InspectorDecisionRow.inspection_id == inspection_id)
                 .order_by(InspectorDecisionRow.timestamp)
+                .all()
+            )
+            return [r.to_dict() for r in rows]
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Per-rule inspector notes (PRD §21)
+# ---------------------------------------------------------------------------
+
+
+def save_rule_notes(
+    inspection_id: str,
+    inspector_id: str,
+    notes: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Replace all per-rule notes for one inspection with a new set.
+
+    Each note must have: rule_id, inspector_status (PASS/FAIL/MANUAL_REVIEW),
+    and optionally: rule_reference, ai_status, note.
+    """
+    init_db()
+    timestamp = _utc_now()
+    with SessionLocal() as session:
+        session.query(InspectorRuleNoteRow).filter(
+            InspectorRuleNoteRow.inspection_id == inspection_id
+        ).delete()
+        for note in notes:
+            row = InspectorRuleNoteRow(
+                inspection_id=inspection_id,
+                inspector_id=inspector_id,
+                rule_id=note.get("rule_id", ""),
+                rule_reference=note.get("rule_reference"),
+                ai_status=note.get("ai_status"),
+                inspector_status=note.get("inspector_status"),
+                note=(note.get("note") or "").strip(),
+                timestamp=timestamp,
+            )
+            session.add(row)
+        session.commit()
+    return {
+        "inspection_id": inspection_id,
+        "inspector_id": inspector_id,
+        "count": len(notes),
+        "timestamp": timestamp,
+    }
+
+
+def get_rule_notes(inspection_id: str) -> List[Dict[str, Any]]:
+    """All per-rule notes for one inspection."""
+    try:
+        init_db()
+        with SessionLocal() as session:
+            rows = (
+                session.query(InspectorRuleNoteRow)
+                .filter(InspectorRuleNoteRow.inspection_id == inspection_id)
+                .order_by(InspectorRuleNoteRow.rule_id)
+                .all()
+            )
+            return [r.to_dict() for r in rows]
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Inspector field corrections (PRD §21)
+# ---------------------------------------------------------------------------
+
+
+def save_field_corrections(
+    inspection_id: str,
+    inspector_id: str,
+    corrections: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Replace all field corrections for one inspection."""
+    init_db()
+    timestamp = _utc_now()
+    with SessionLocal() as session:
+        session.query(InspectorFieldCorrectionRow).filter(
+            InspectorFieldCorrectionRow.inspection_id == inspection_id
+        ).delete()
+        for c in corrections:
+            row = InspectorFieldCorrectionRow(
+                inspection_id=inspection_id,
+                inspector_id=inspector_id,
+                field_name=c.get("field_name", ""),
+                original_value=str(c.get("original_value")) if c.get("original_value") is not None else None,
+                corrected_value=str(c.get("corrected_value") or ""),
+                reason=(c.get("reason") or "").strip(),
+                timestamp=timestamp,
+            )
+            session.add(row)
+        session.commit()
+    return {
+        "inspection_id": inspection_id,
+        "inspector_id": inspector_id,
+        "count": len(corrections),
+        "timestamp": timestamp,
+    }
+
+
+def get_field_corrections(inspection_id: str) -> List[Dict[str, Any]]:
+    """All field corrections for one inspection."""
+    try:
+        init_db()
+        with SessionLocal() as session:
+            rows = (
+                session.query(InspectorFieldCorrectionRow)
+                .filter(InspectorFieldCorrectionRow.inspection_id == inspection_id)
+                .order_by(InspectorFieldCorrectionRow.field_name)
                 .all()
             )
             return [r.to_dict() for r in rows]

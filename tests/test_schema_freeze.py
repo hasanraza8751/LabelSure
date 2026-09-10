@@ -1,4 +1,4 @@
-"""Schema freeze: the /inspect response contract is `labelguard-inspection/1.1`.
+"""Schema freeze: the /inspect response contract is `labelguard-inspection/1.2`.
 
 These tests pin the exact top-level keys of the response and the exact keys
 of every review action. Any intentional schema change requires bumping
@@ -15,6 +15,10 @@ Version history
        annotated_images      PRD 20 - highlighted evidence overlays
        disclaimer            PRD 35 - "AI-assisted compliance screening"
      test_v1_0_keys_still_present below is the backward-compatibility guard.
+1.2  Additive only - no 1.1 key removed, renamed or retyped. Adds:
+       ai                    Two-stage AI verification + adjudication block.
+                             Contains status, reason, verification corrections,
+                             and adjudication verdict. null when AI unavailable.
 """
 
 import sys
@@ -46,6 +50,7 @@ FROZEN_TOP_LEVEL_KEYS = {
     "decision_downgraded_from",
     "decision_emoji",
     "review_actions",
+    "ai",
     "compliance_score",
     "product_category",
     "regulation_citations",
@@ -133,7 +138,7 @@ class TestSchemaFreeze:
 
     def test_response_schema_version(self):
         assert self.result["response_schema"] == RESPONSE_SCHEMA
-        assert RESPONSE_SCHEMA == "labelguard-inspection/1.1"
+        assert RESPONSE_SCHEMA == "labelguard-inspection/1.2"
 
     def test_v1_0_keys_still_present(self):
         """Backward compatibility: a 1.0 consumer must still find every key."""

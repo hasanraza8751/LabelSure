@@ -190,16 +190,53 @@ export interface Inspection {
   annotated_images: AnnotatedImage[]
   disclaimer: Disclaimer
   processing_time_sec: number | null
+  /** Targeted manual-review actions: exactly where to look, per field. */
+  review_actions?: ReviewAction[]
+}
+
+/** One targeted manual-review item: the field is unresolved and the payload
+ *  names the exact surface to re-check (never "inspect the whole package"). */
+export interface ReviewAction {
+  field: string
+  field_label: string
+  rule_id: string
+  rule_reference: string
+  status: string
+  severity: string
+  reason: string
+  check_location: string
+  source_image?: string | null
+  confidence: number
+  current_value?: unknown
+}
+
+/** An inspector's correction to an AI-extracted value. The original AI value
+ *  is never overwritten in the stored payload. */
+export interface FieldCorrection {
+  field_name: string
+  original_value: string | null
+  corrected_value: string
+  reason: string
+  inspector_id: string
+  timestamp: string
 }
 
 export interface InspectionSummary {
   inspection_id: string
   product_name?: string | null
+  brand?: string | null
+  manufacturer?: string | null
   decision?: Decision | null
   confidence?: number | null
+  compliance_score?: number | null
+  surfaces_total?: number | null
+  surfaces_usable?: number | null
   timestamp?: string
   priority?: string | null
-  compliance_score?: number | null
+  /** PENDING | ACCEPT | OVERRIDE */
+  inspector_status?: string | null
+  final_decision?: Decision | null
+  num_rules_fail?: number | null
   [key: string]: unknown
 }
 
@@ -322,6 +359,8 @@ export interface Stats {
   average_confidence: number | null
   average_compliance_score: number | null
   by_decision: Record<string, number>
+  /** Counts by sign-off state; backend maps NULL to "PENDING". */
+  by_inspector_status: Record<string, number>
   by_category: Record<string, number>
   common_violations: { rule_id: string; count: number }[]
   manufacturer_trends: unknown[]

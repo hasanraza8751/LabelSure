@@ -13,15 +13,16 @@ authorised inspector before any action is taken.
 
 ## Running it
 
-Two processes: the FastAPI backend and the React frontend.
+Start both the FastAPI backend and the React frontend together:
 
 ```bash
-.venv312/Scripts/python.exe -m uvicorn backend.app.main:app --port 8000
+./run_labelsure.sh
 ```
 
-```bash
-npm install --prefix web && npm run dev --prefix web
-```
+The launcher uses the `legal_metrology` Python environment, installs the
+frontend dependencies if needed, and stops both services when you press
+`Ctrl+C`. To use a different Python executable, set `LABELSURE_PYTHON` before
+running it.
 
 The app is then at <http://localhost:5174>. The frontend proxies `/api/*` to the
 backend, so both run on one origin locally.

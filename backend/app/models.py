@@ -94,6 +94,36 @@ class InspectorDecisionResponse(BaseModel):
     supersedes: Optional[str] = None
 
 
+class RuleNoteItem(BaseModel):
+    rule_id: str
+    rule_reference: Optional[str] = None
+    ai_status: Optional[str] = None
+    inspector_status: str  # PASS | FAIL | MANUAL_REVIEW
+    note: Optional[str] = None
+
+
+class RuleNotesRequest(BaseModel):
+    notes: List[RuleNoteItem]
+    inspector_id: Optional[str] = None
+
+
+class FieldCorrectionItem(BaseModel):
+    field_name: str
+    original_value: Optional[Any] = None
+    corrected_value: Any
+    reason: Optional[str] = None
+
+
+class FieldCorrectionsRequest(BaseModel):
+    corrections: List[FieldCorrectionItem]
+    inspector_id: Optional[str] = None
+
+
+class EmailReportRequest(BaseModel):
+    to: str = Field(..., max_length=254)
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
 # ---------------------------------------------------------------------------
 # Auth (PRD 30)
 # ---------------------------------------------------------------------------

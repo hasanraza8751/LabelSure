@@ -113,8 +113,7 @@ export function InspectPage() {
       <header className="flex flex-col gap-1">
         <h1 className="text-3xl font-semibold tracking-tight">Inspect a package</h1>
         <p className="text-muted-foreground">
-          Upload one to {MAX_SURFACES} photographs of the same package. More surfaces
-          means more declarations found, and fewer findings that fall to manual review.
+          Upload up to {MAX_SURFACES} photos of the same package for a faster, clearer decision.
         </p>
       </header>
 

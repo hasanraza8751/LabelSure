@@ -10,7 +10,6 @@ import { InspectPage } from "@/pages/inspect"
 import { InspectionDetailPage } from "@/pages/inspection-detail"
 import { LandingPage } from "@/pages/landing"
 import { RegulationsPage } from "@/pages/regulations"
-import { ReviewQueuePage } from "@/pages/review-queue"
 
 export default function App() {
   return (
@@ -24,7 +23,7 @@ export default function App() {
               <Route path="/inspect" element={<InspectPage />} />
               <Route path="/ask" element={<AskPage />} />
               <Route path="/regulations" element={<RegulationsPage />} />
-              <Route path="/queue" element={<ReviewQueuePage />} />
+              <Route path="/queue" element={<Navigate to="/dashboard" replace />} />
               <Route path="/inspections/:id" element={<InspectionDetailPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

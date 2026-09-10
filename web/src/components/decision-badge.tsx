@@ -55,6 +55,39 @@ export function DecisionBadge({
   )
 }
 
+/**
+ * The verdict a person put their name beside - deliberately a different chip
+ * from the automated one, so "what the machine said" and "what the human
+ * confirmed" never read as the same finding (PRD §21).
+ */
+export function FinalDecisionBadge({
+  decision,
+  className,
+}: {
+  decision: string | null | undefined
+  className?: string
+}) {
+  if (!decision) return null
+  const key = decision as Decision
+  if (key in DECISION_STYLES) {
+    const { label, className: tone, Icon } = DECISION_STYLES[key]
+    return (
+      <Badge
+        variant="default"
+        className={cn("gap-1.5 border-emerald-600/40 font-medium", tone, className)}
+      >
+        <Icon className="size-3.5" />
+        Human: {label}
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="outline" className={cn("gap-1.5", className)}>
+      Human: {decision}
+    </Badge>
+  )
+}
+
 const STATUS_STYLES: Record<RuleStatus, { label: string; className: string }> = {
   PASS: {
     label: "Pass",

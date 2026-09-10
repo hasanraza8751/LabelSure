@@ -114,7 +114,11 @@ class LabelGuardEngine:
         rules_path: Optional[str] = None,
         rules: Optional[List[Dict[str, Any]]] = None,
         enforce_verification: bool = False,
+        max_missing_for_review: int = 5,
     ):
+        if max_missing_for_review < 0:
+            raise ValueError("max_missing_for_review must be non-negative")
+        self.max_missing_for_review = max_missing_for_review
         if rules is not None:
             self.rules = rules
             self.meta = {}
@@ -164,10 +168,53 @@ class LabelGuardEngine:
         review = [r for r in rule_results if r.status in (MANUAL_REVIEW, UNVERIFIED)]
         definitive = [r for r in rule_results if r.status in (PASS, FAIL)]
 
-        if failed:
-            reasons = [f"{r.rule_id} ({r.severity}): {r.reason}" for r in failed]
+        # An absence-based FAIL is only evidence that the declaration was not
+        # seen on the surfaces photographed - if a human indication exists for
+        # missing info elsewhere, or the capture may be incomplete, that is an
+        # inspector question, not a machine verdict (PRD §14: "clear mandatory
+        # violation" only). A definitive failure (invalid wording, contrast,
+        # entity formatting...) is still NON_COMPLIANT.
+        hard_fails = [r for r in failed if not (r.evidence or {}).get("absence_fail")]
+
+        if hard_fails:
+            reasons = [f"{r.rule_id} ({r.severity}): {r.reason}" for r in hard_fails]
             return ComplianceDecision(
                 decision="NON_COMPLIANT",
+                reasons=reasons,
+                failed_rules=[r.rule_id for r in hard_fails],
+                review_rules=[r.rule_id for r in review],
+            )
+        if failed:
+            missing_fields = {
+                field
+                for rule in failed
+                if (rule.evidence or {}).get("absence_fail")
+                for field in rule.fields
+            }
+            if len(missing_fields) > self.max_missing_for_review:
+                reasons = [
+                    f"{r.rule_id} ({r.severity}): {r.reason}"
+                    for r in failed
+                ]
+                reasons.insert(
+                    0,
+                    f"{len(missing_fields)} mandatory declarations are missing, "
+                    f"exceeding the review threshold of {self.max_missing_for_review}",
+                )
+                return ComplianceDecision(
+                    decision="NON_COMPLIANT",
+                    reasons=reasons,
+                    failed_rules=[r.rule_id for r in failed],
+                    review_rules=[r.rule_id for r in review],
+                )
+            reasons = [
+                f"{r.rule_id} ({r.severity}): {r.reason} "
+                "(- absence on captured surfaces cannot by itself prove "
+                "non-compliance - manual verification required)"
+                for r in failed
+            ]
+            return ComplianceDecision(
+                decision="MANUAL_REVIEW",
                 reasons=reasons,
                 failed_rules=[r.rule_id for r in failed],
                 review_rules=[r.rule_id for r in review],
@@ -377,6 +424,7 @@ class LabelGuardEngine:
 
     def _check_net_quantity(self, base, rule, fields, quality, pointers):
         value = self._fget(fields, "net_quantity", "value")
+        ext_status = str(self._fget(fields, "net_quantity", "extraction_status") or "").upper()
         if value:
             base.evidence = self._field_evidence(fields, "net_quantity")
             if self._low_confidence(fields, "net_quantity"):
@@ -388,6 +436,16 @@ class LabelGuardEngine:
             else:
                 base.status = MANUAL_REVIEW
                 base.reason = f"Net quantity declared but no standard unit detected in '{value}'"
+            return base
+        # No value — check if OCR saw something but couldn't read it
+        if ext_status == "UNREADABLE":
+            base.status = MANUAL_REVIEW
+            base.reason = (
+                "A net quantity/weight label was detected on the label but "
+                "the OCR confidence was too low to read the value — "
+                "verify the net quantity on the original image"
+            )
+            base.evidence = self._field_evidence(fields, "net_quantity")
             return base
         return self._absence(base, ["net_quantity"], quality, pointers, "net quantity")
 
@@ -411,6 +469,19 @@ class LabelGuardEngine:
                     base.status = MANUAL_REVIEW
                     base.reason = f"Date declared ('{value}') but month-and-year representation not confirmed"
                 return base
+        # No value — check if OCR saw something but couldn't read it
+        for name in ("manufacturing_date", "packing_date"):
+            ext_status = str(self._fget(fields, name, "extraction_status") or "").upper()
+            if ext_status == "UNREADABLE":
+                base.status = MANUAL_REVIEW
+                base.reason = (
+                    "A manufacturing/packing date label was detected but "
+                    "the OCR confidence was too low to read the date value — "
+                    "verify the date (month and year of manufacture/packing) on "
+                    "the original image, particularly for dot-matrix or base printing"
+                )
+                base.evidence = self._field_evidence(fields, name)
+                return base
         return self._absence(
             base, ["manufacturing_date", "packing_date"], quality, pointers,
             "month and year of manufacture/packing",
@@ -418,6 +489,7 @@ class LabelGuardEngine:
 
     def _check_mrp(self, base, rule, fields, quality, pointers):
         value = self._fget(fields, "mrp", "value")
+        ext_status = str(self._fget(fields, "mrp", "extraction_status") or "").upper()
         if value:
             base.evidence = self._field_evidence(fields, "mrp")
             if self._low_confidence(fields, "mrp"):
@@ -438,6 +510,16 @@ class LabelGuardEngine:
             else:
                 base.status = MANUAL_REVIEW
                 base.reason = f"Price declared ('{value}') but value not parseable/plausible"
+            return base
+        # No value extracted — check if OCR saw something but couldn't read it
+        if ext_status == "UNREADABLE":
+            base.status = MANUAL_REVIEW
+            base.reason = (
+                "A price-cue keyword (MRP/₹/Rs) was detected on the label but "
+                "the OCR confidence was too low to read the value — "
+                "verify the retail sale price on the original image"
+            )
+            base.evidence = self._field_evidence(fields, "mrp")
             return base
         return self._absence(base, ["mrp"], quality, pointers, "retail sale price (MRP)")
 
@@ -593,11 +675,20 @@ class LabelGuardEngine:
         ]
         failed = [r for r in declaration_results if r.status == FAIL]
         review = [r for r in declaration_results if r.status in (MANUAL_REVIEW, UNVERIFIED)]
-        if failed:
+        hard = [r for r in failed if not (r.evidence or {}).get("absence_fail")]
+        soft = [r for r in failed if (r.evidence or {}).get("absence_fail")]
+        if hard:
             base.status = FAIL
+            base.reason = f"Required declaration(s) invalid: {', '.join(r.rule_id for r in hard)}"
+        elif soft:
+            # An absence is only as trustworthy as the capture behind it. With
+            # no definitive violation beyond "not seen on the surfaces shot",
+            # Rule 4 stays a human question, not a machine verdict (PRD §14).
+            base.status = MANUAL_REVIEW
             base.reason = (
-                f"Required declaration(s) missing or invalid: "
-                f"{', '.join(r.rule_id for r in failed)}"
+                f"Declaration(s) not visible on captured surfaces "
+                f"({', '.join(r.rule_id for r in soft)}) - possibly on an "
+                "uncaptured surface; verify manually."
             )
         elif review:
             base.status = MANUAL_REVIEW
@@ -641,6 +732,7 @@ class LabelGuardEngine:
             base.evidence = {"detected": False, "reference_pointer": pointer}
             return base
         base.status = FAIL
+        base.evidence = {"detected": False, "absence_fail": True}
         base.reason = f"The {label} is not declared on any captured package surface"
         return base
 

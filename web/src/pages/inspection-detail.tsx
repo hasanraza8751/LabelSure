@@ -32,9 +32,9 @@ export function InspectionDetailPage() {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8">
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
-          <Link to="/queue">
+          <Link to="/dashboard">
             <ArrowLeft />
-            Back to the queue
+            Back to the dashboard
           </Link>
         </Button>
         {id && inspection && (

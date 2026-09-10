@@ -17,15 +17,19 @@ from backend.app.services.report_generator import FIELD_LABELS
 from backend.app.services import annotate as annotate_service
 from backend.app.services import legal
 from backend.app.services import ocr_service
+from backend.app.services.gemini import get_service as _get_gemini
 
 # Frozen response schema version (see tests/test_schema_freeze.py).
 #
 # 1.0 -> 1.1 (additive only, no key removed or retyped): adds
 #   compliance_score, product_category, regulation_citations,
 #   annotated_images, disclaimer.
+# 1.1 -> 1.2 (additive): adds the `ai` block (AI visual verification +
+#   adjudication). A 1.1 consumer keeps working - every 1.1 key is still
+#   present with the same meaning, `ai` is simply new.
 # A 1.0 consumer keeps working - every 1.0 key is still present with the
 # same meaning.
-RESPONSE_SCHEMA = "labelguard-inspection/1.1"
+RESPONSE_SCHEMA = "labelguard-inspection/1.2"
 
 FIELD_NAMES = [
     "mrp",
@@ -179,6 +183,7 @@ class InspectionPipeline:
                 "ocr_confidence": f.ocr_confidence,
                 "extraction_confidence": f.extraction_confidence,
                 "confidence_level": f.confidence_level,
+                "extraction_status": f.extraction_status,
                 "bbox": f.bbox,
                 "reason": f.reason,
                 "line_index": f.line_index,
@@ -288,6 +293,7 @@ class InspectionPipeline:
                             "ocr_confidence": f.ocr_confidence,
                             "extraction_confidence": f.extraction_confidence,
                             "confidence_level": f.confidence_level,
+                            "extraction_status": f.extraction_status,
                             "bbox": f.bbox,
                             "reason": f.reason,
                             "line_index": f.line_index,
@@ -335,6 +341,7 @@ class InspectionPipeline:
             "decision_downgraded_from": None,
             "decision_emoji": None,
             "review_actions": [],
+            "ai": None,
             "compliance_score": None,
             "product_category": None,
             "regulation_citations": [],
@@ -441,6 +448,23 @@ class InspectionPipeline:
             confidence.overall,
         )
 
+        # Store the original deterministic extraction for audit trail (before AI corrections)
+        import copy
+        result["original_extracted_fields"] = copy.deepcopy(result["extracted_fields"])
+
+        self._ai_stage(
+            result,
+            merged_fields,
+            rule_results,
+            compliance,
+            confidence,
+            evidence["pointers"],
+            per_image,
+            merged_quality,
+            image_paths,
+            names,
+        )
+
         # Compliance score (PRD 26): 0-100 with a per-category breakdown
         result["compliance_score"] = compute_compliance_score(result["rule_results"])
 
@@ -491,6 +515,158 @@ class InspectionPipeline:
 
         result["processing_time_sec"] = round(time.time() - started, 2)
         return result
+
+    # ------------------------------------------------------------------
+    # AI two-stage (verification -> corrected rules -> adjudication)
+    # ------------------------------------------------------------------
+
+    def _ai_stage(
+        self,
+        result: Dict[str, Any],
+        merged_fields: Dict[str, Any],
+        rule_results: List[RuleResult],
+        compliance: Any,
+        confidence: ConfidenceResult,
+        pointers: List[Dict[str, Any]],
+        per_image: List[Dict[str, Any]],
+        merged_quality: Dict[str, Any],
+        image_paths: List[str],
+        names: List[str],
+    ) -> None:
+        """Optional AI final-verdict stage. Always records why it ran/failed.
+
+        On success:
+        * result["ai"] carries both passes.
+        * result["rule_results_deterministic"] keeps the original rule set for
+          the audit trail; result["rule_results"] is replaced by the corrected
+          set.
+        * decision/confidence are updated to the adjudication.
+        """
+        astage: Dict[str, Any] = {"status": "skipped", "reason": None}
+        service = _get_gemini()
+        if not service.available:
+            astage["reason"] = "GEMINI_API_KEY not configured - deterministic result stands"
+            result["ai"] = astage
+            return
+
+        rule_dicts = [
+            r.to_dict() if isinstance(r, RuleResult) else r for r in rule_results
+        ]
+        ocr_traces = {
+            e["name"]: (e.get("ocr") or {}).get("texts", [])
+            for e in per_image
+            if e.get("ocr")
+        }
+        verified = service.verify_fields(
+            merged_fields,
+            rule_dicts,
+            image_paths,
+            names,
+            ocr_traces,
+        )
+        if verified is None:
+            astage["reason"] = (
+                f"verification failed: {getattr(service, 'last_error', 'unknown error')}"
+            )
+            result["ai"] = astage
+            return
+
+        corrections = {}
+        for name, entry in verified.items():
+            try:
+                field = result["extracted_fields"].get(name)
+                if not isinstance(field, dict):
+                    continue
+                status = entry["status"]
+                changed = False
+                if status in ("FOUND", "FOUND_LOW_CONFIDENCE") and entry["value"]:
+                    cleaned = str(entry["value"]).strip()
+                    if field.get("value") != cleaned:
+                        field["value"] = cleaned
+                        changed = True
+                    if entry.get("source_image"):
+                        field["source_image"] = entry["source_image"]
+                    field["extraction_confidence"] = (
+                        0.95
+                        if status == "FOUND"
+                        else min(0.70, field.get("extraction_confidence", 0.70))
+                    )
+                    field["confidence_level"] = (
+                        "HIGH"
+                        if status == "FOUND"
+                        else field.get("confidence_level", "LOW")
+                    )
+                    field["ai_verified"] = True
+                    corrections[name] = entry
+                elif status == "NOT_FOUND":
+                    if field.get("value") is not None:
+                        field["value"] = None
+                        changed = True
+                    field["ai_verified"] = True
+                    corrections[name] = entry
+                else:
+                    field.setdefault("ai_notes", []).append(
+                        f"status={status}: {entry.get('reason', '')}"
+                    )
+            except Exception:
+                continue
+
+        if corrections:
+            result["rule_results_deterministic"] = [
+                r.to_dict() if isinstance(r, RuleResult) else r
+                for r in rule_results
+            ]
+            corrected_rules, corrected_compliance = self.evaluate_rules(
+                result["extracted_fields"],
+                merged_quality,
+                pointers=pointers,
+            )
+            dicts = [
+                r.to_dict() if isinstance(r, RuleResult) else r
+                for r in corrected_rules
+            ]
+            result["rule_results"] = dicts
+
+        # Pass 2: adjudication over the (possibly corrected) evidence
+        adjudicated = service.adjudicate(
+            corrections,
+            result["rule_results"],
+            result["review_actions"],
+            image_paths,
+            names,
+        )
+        astage["status"] = "ok" if adjudicated else "verified_only"
+        if adjudicated:
+            astage["adjudication"] = adjudicated
+            result["decision"] = adjudicated["verdict"]
+            result["decision_reasons"] = [
+                adjudicated.get("explanation", "AI adjudication verdict")
+            ]
+            result["decision_emoji"] = DECISION_EMOJI.get(
+                adjudicated["verdict"], result["decision_emoji"]
+            )
+            ai_conf = adjudicated.get("confidence")
+            if isinstance(ai_conf, (int, float)) and result.get("confidence"):
+                blended = (
+                    0.5 * float(ai_conf) + 0.5 * result["confidence"]["overall"]
+                )
+                result["confidence"]["overall"] = round(blended, 4)
+        else:
+            astage["reason"] = "adjudication unavailable"
+            if not result.get("decision"):
+                result["decision"] = "MANUAL_REVIEW"
+                result["decision_emoji"] = DECISION_EMOJI["MANUAL_REVIEW"]
+
+        if corrections:
+            result["review_actions"] = build_review_actions(
+                result["rule_results"],
+                result["extracted_fields"],
+                pointers,
+                result["images"],
+                (result.get("confidence") or {}).get("overall", 0.0),
+            )
+        astage["verification"] = corrections
+        result["ai"] = astage
 
     # ------------------------------------------------------------------
     # Merge helpers (pure logic, unit-testable)
