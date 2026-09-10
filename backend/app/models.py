@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class QualityResponse(BaseModel):
@@ -121,3 +121,23 @@ class RegulationSearchRequest(BaseModel):
     top_k: int = 5
     category: Optional[str] = None
     rule_reference: Optional[str] = None
+    document: Optional[str] = None
+
+
+class ChatTurn(BaseModel):
+    """One prior turn, so a follow-up question can resolve what it refers to."""
+
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., max_length=4000)
+
+
+class RAGAskRequest(BaseModel):
+    """A message to the assistant: a regulation question, or conversation."""
+
+    query: str = Field(..., min_length=1, max_length=1000)
+    k: int = Field(default=5, ge=1, le=20)
+    use_reranker: bool = True
+    category: Optional[str] = None
+    temperature: float = Field(default=0.3, ge=0.0, le=1.0)
+    max_tokens: int = Field(default=900, ge=50, le=2048)
+    history: List[ChatTurn] = Field(default_factory=list, max_length=20)

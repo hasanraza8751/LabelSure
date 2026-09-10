@@ -1,0 +1,296 @@
+import { useEffect, useRef, useState } from "react"
+import { BookOpen, CircleSlash, Send, Sparkles } from "lucide-react"
+import { toast } from "sonner"
+
+import { Disclaimer } from "@/components/disclaimer"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+} from "@/components/ui/input-group"
+import { Spinner } from "@/components/ui/spinner"
+import { api, ApiError } from "@/lib/api"
+import type { ChatTurn, RagAnswer } from "@/lib/types"
+
+const EXAMPLES = [
+  "What must be declared as the retail sale price on a pre-packaged commodity?",
+  "How should the month and year of manufacture be shown?",
+  "What are the minimum height requirements for the declarations?",
+  "Which packages are exempt from the packaged commodities rules?",
+]
+
+type Turn = { question: string; answer: RagAnswer | null; error?: string }
+
+export function AskPage() {
+  const [question, setQuestion] = useState("")
+  const [turns, setTurns] = useState<Turn[]>([])
+  const [busy, setBusy] = useState(false)
+  const endRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [turns, busy])
+
+  async function ask(text: string) {
+    const query = text.trim()
+    if (!query || busy) return
+    setBusy(true)
+    setQuestion("")
+    // Send the exchange so far, so a follow-up like "and for imports?" has
+    // something to refer back to. Only completed turns count.
+    const history: ChatTurn[] = turns.flatMap((turn) =>
+      turn.answer
+        ? [
+            { role: "user" as const, content: turn.question },
+            { role: "assistant" as const, content: turn.answer.answer },
+          ]
+        : [],
+    )
+    setTurns((current) => [...current, { question: query, answer: null }])
+    try {
+      const answer = await api.ask({ query, k: 5, history })
+      setTurns((current) =>
+        current.map((turn, i) => (i === current.length - 1 ? { ...turn, answer } : turn)),
+      )
+    } catch (error) {
+      const message =
+        error instanceof ApiError ? error.message : "Could not reach the compliance API"
+      setTurns((current) =>
+        current.map((turn, i) =>
+          i === current.length - 1 ? { ...turn, error: message } : turn,
+        ),
+      )
+      toast.error(message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-8">
+      <header className="flex flex-col gap-2">
+        <h1 className="text-3xl font-semibold tracking-tight">Ask the rules</h1>
+        <p className="text-muted-foreground">
+          Ask about the packaged commodities rules and the answer comes from the
+          indexed corpus, with the clauses that support it. Ordinary questions
+          about this tool are answered too. When the corpus does not cover
+          something, the assistant says so instead of composing
+          statutory-sounding prose.
+        </p>
+      </header>
+
+      {turns.length === 0 && (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Sparkles />
+            </EmptyMedia>
+            <EmptyTitle>Ask about packaged-commodity labelling</EmptyTitle>
+            <EmptyDescription>
+              Or just say hello. Try one of these to start.
+            </EmptyDescription>
+          </EmptyHeader>
+          <div className="flex flex-col gap-2">
+            {EXAMPLES.map((example) => (
+              <Button
+                key={example}
+                variant="outline"
+                size="sm"
+                className="h-auto py-2 text-left whitespace-normal"
+                onClick={() => ask(example)}
+              >
+                {example}
+              </Button>
+            ))}
+          </div>
+        </Empty>
+      )}
+
+      <div className="flex flex-col gap-6">
+        {turns.map((turn, index) => (
+          <div key={index} className="flex flex-col gap-3">
+            <div className="bg-muted ml-auto max-w-[85%] rounded-lg px-4 py-2.5 text-sm">
+              {turn.question}
+            </div>
+            {turn.error ? (
+              <Alert variant="destructive">
+                <AlertTitle>Could not answer</AlertTitle>
+                <AlertDescription>{turn.error}</AlertDescription>
+              </Alert>
+            ) : turn.answer ? (
+              <AnswerCard answer={turn.answer} />
+            ) : (
+              <Card>
+                <CardContent className="text-muted-foreground flex items-center gap-3 py-6 text-sm">
+                  <Spinner />
+                  Searching the regulation corpus…
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+
+      <div className="bg-background sticky bottom-4">
+        <InputGroup>
+          <InputGroupTextarea
+            placeholder="Ask about a declaration, an exemption, or how this tool works…"
+            value={question}
+            rows={2}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                ask(question)
+              }
+            }}
+          />
+          <InputGroupAddon align="block-end">
+            <span className="text-muted-foreground text-xs">
+              Enter to send, Shift+Enter for a new line
+            </span>
+            <InputGroupButton
+              className="ml-auto"
+              disabled={busy || !question.trim()}
+              onClick={() => ask(question)}
+            >
+              {busy ? <Spinner data-icon /> : <Send />}
+              Ask
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+      </div>
+
+      <Disclaimer />
+    </div>
+  )
+}
+
+function AnswerCard({ answer }: { answer: RagAnswer }) {
+  // A greeting, or a question about this tool, is not a failed lookup. Showing
+  // it in the refusal card would tell the reader the corpus was searched and
+  // came up short, which is not what happened.
+  if (answer.intent !== "regulation") {
+    return (
+      <Card>
+        <CardContent className="flex gap-3 py-5 text-sm leading-relaxed whitespace-pre-wrap">
+          <Sparkles className="text-primary mt-0.5 size-4 shrink-0" />
+          <span>{answer.answer}</span>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (!answer.grounded) {
+    return (
+      <Card className="border-amber-600/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CircleSlash className="text-amber-600" />
+            Not answered
+          </CardTitle>
+          <CardDescription>{answer.answer}</CardDescription>
+        </CardHeader>
+        {answer.sources.length > 0 && (
+          <CardContent>
+            <p className="text-muted-foreground mb-3 text-sm">
+              The closest clauses retrieved, for you to judge yourself:
+            </p>
+            <SourceList sources={answer.sources} />
+          </CardContent>
+        )}
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>Answer</CardTitle>
+          <Badge variant="secondary">
+            {Math.round(answer.confidence * 100)}% retrieval confidence
+          </Badge>
+          <Badge variant="outline">
+            {answer.generator === "groq" ? "language model" : "verbatim extract"}
+          </Badge>
+          {answer.reranked && <Badge variant="outline">reranked</Badge>}
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <div className="text-sm leading-relaxed whitespace-pre-wrap">{answer.answer}</div>
+        <div>
+          <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
+            <BookOpen className="size-4" />
+            Sources ({answer.sources.length})
+          </h3>
+          <SourceList sources={answer.sources} />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function SourceList({ sources }: { sources: RagAnswer["sources"] }) {
+  return (
+    <Accordion type="multiple">
+      {sources.map((source) => (
+        <AccordionItem key={source.chunk_id} value={source.chunk_id}>
+          <AccordionTrigger>
+            <span className="flex flex-wrap items-center gap-2 text-left">
+              <span className="font-mono text-xs">{source.metadata.rule}</span>
+              <span>{source.metadata.title}</span>
+              <Badge variant="secondary" className="tabular-nums">
+                {source.score.toFixed(2)}
+              </Badge>
+            </span>
+          </AccordionTrigger>
+          <AccordionContent className="flex flex-col gap-3">
+            <blockquote className="border-l-2 pl-3 text-sm">{source.content}</blockquote>
+            <p className="text-muted-foreground text-xs">
+              {source.metadata.document}
+              {source.metadata.page ? ` · page ${source.metadata.page}` : ""}
+              {source.metadata.verified ? " · verified against the source document" : ""}
+            </p>
+            <dl className="text-muted-foreground grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+              <ScoreRow label="Keyword" value={source.scores.keyword} />
+              <ScoreRow label="Vector" value={source.scores.vector} />
+              <ScoreRow label="Hybrid" value={source.scores.hybrid} />
+              <ScoreRow label="Rank fusion" value={source.scores.rrf} />
+            </dl>
+          </AccordionContent>
+        </AccordionItem>
+      ))}
+    </Accordion>
+  )
+}
+
+function ScoreRow({ label, value }: { label: string; value: number | null | undefined }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <dt>{label}</dt>
+      <dd className="tabular-nums">
+        {typeof value === "number" ? value.toFixed(3) : "—"}
+      </dd>
+    </div>
+  )
+}

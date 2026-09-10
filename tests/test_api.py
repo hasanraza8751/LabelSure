@@ -45,7 +45,7 @@ class TestHealthAndDocs:
 class TestRegulationEndpoints:
     def test_corpus_stats(self, client):
         body = client.get("/regulations").json()
-        assert body["chunks"] == 31
+        assert body["chunks"] >= 31
 
     def test_search_returns_citations(self, client):
         body = client.get(
@@ -313,3 +313,99 @@ class TestAuthEnforced:
             ).status_code
             == 200
         )
+
+
+class TestRAGEndpoints:
+    def test_status_reports_the_backends(self, client):
+        body = client.get("/rag").json()
+        assert body["web_search"] is False
+        assert body["generator"] in ("groq", "extractive")
+        assert body["corpus"]["chunks"] >= 31
+
+    def test_ask_returns_a_grounded_answer_with_sources(self, client):
+        body = client.post(
+            "/rag/ask", json={"query": "retail sale price declaration", "k": 3}
+        ).json()
+        assert body["grounded"] is True
+        assert body["sources"]
+        assert body["sources"][0]["metadata"]["rule"]
+        assert body["used_web_search"] is False
+
+    def test_empty_query_is_rejected(self, client):
+        assert client.post("/rag/ask", json={"query": ""}).status_code == 422
+
+    def test_k_is_bounded(self, client):
+        assert client.post(
+            "/rag/ask", json={"query": "net quantity", "k": 999}
+        ).status_code == 422
+
+
+class TestAnnotatedEvidence:
+    def test_unknown_inspection_is_404(self, client):
+        assert client.get("/inspections/nope/annotated/0").status_code == 404
+
+    def test_out_of_range_index_is_404(self, client, stored):
+        response = client.get(f"/inspections/{stored['inspection_id']}/annotated/99")
+        assert response.status_code == 404
+
+    def test_a_path_outside_the_evidence_directory_is_refused(self, client, stored):
+        """A doctored record must not turn into an arbitrary file read."""
+        import backend.app.database as db
+
+        stored["annotated_images"] = [{"name": "x", "path": __file__, "boxes": []}]
+        db.save_inspection(stored)
+        response = client.get(f"/inspections/{stored['inspection_id']}/annotated/0")
+        assert response.status_code == 404
+
+
+class TestDocumentBrowsing:
+    LMPCR = "The Legal Metrology (Packaged Commodities) Rules, 2011"
+
+    def test_documents_are_listed_with_their_share_of_the_corpus(self, client):
+        body = client.get("/regulations/documents").json()
+        names = {d["document"]: d for d in body["documents"]}
+        assert self.LMPCR in names
+        assert names[self.LMPCR]["chunks"] == 31
+
+    def test_a_document_can_be_browsed_without_a_query(self, client):
+        body = client.get(
+            "/regulations/search", params={"q": "", "document": self.LMPCR}
+        ).json()
+        assert body["count"] == 31
+        assert body["document"] == self.LMPCR
+
+    def test_a_browsed_clause_carries_no_score(self, client):
+        """Browsing is not searching: nothing was ranked."""
+        body = client.get(
+            "/regulations/search", params={"q": "", "document": self.LMPCR}
+        ).json()
+        assert body["results"][0]["score"] is None
+
+    def test_browsing_is_ordered_by_page(self, client):
+        body = client.get(
+            "/regulations/search", params={"q": "", "document": self.LMPCR}
+        ).json()
+        pages = [r["citation"]["page"] for r in body["results"]]
+        assert pages == sorted(pages)
+
+    def test_search_can_be_scoped_to_one_document(self, client):
+        body = client.get(
+            "/regulations/search",
+            params={"q": "price", "top_k": 10, "document": self.LMPCR},
+        ).json()
+        assert body["count"] > 0
+        assert all(r["citation"]["document"] == self.LMPCR for r in body["results"])
+
+    def test_an_empty_query_with_no_document_is_still_rejected(self, client):
+        assert client.get("/regulations/search", params={"q": "  "}).status_code == 422
+
+    def test_an_unknown_document_is_empty_with_a_note(self, client):
+        body = client.get(
+            "/regulations/search", params={"q": "", "document": "No Such Gazette"}
+        ).json()
+        assert body["count"] == 0
+        assert "No clauses indexed" in body["note"]
+
+    def test_the_documents_route_is_not_read_as_a_rule_id(self, client):
+        """/regulations/documents must not match /regulations/{rule_id}."""
+        assert client.get("/regulations/documents").status_code == 200
