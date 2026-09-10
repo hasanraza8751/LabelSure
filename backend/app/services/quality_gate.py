@@ -46,7 +46,9 @@ class ImageQualityGate:
         if lines is not None and len(lines) > 0:
             angles = []
             for line in lines:
-                x1, y1, x2, y2 = line[0]
+                # OpenCV 4 yields (N, 1, 4); OpenCV 5 yields (N, 4).
+                coords = line[0] if getattr(line, "ndim", 1) > 1 else line
+                x1, y1, x2, y2 = coords
                 angle = np.abs(np.arctan2(y2 - y1, x2 - x1) * 180.0 / np.pi)
                 if angle > 45:
                     angle = 90 - angle

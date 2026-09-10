@@ -10,14 +10,27 @@ from backend.app.services.labelguard_engine import LabelGuardEngine
 from backend.app.services.confidence import ConfidenceEngine, ConfidenceResult, DECISION_EMOJI
 from backend.app.services.evidence import EvidencePipeline
 from backend.app.services.review_actions import build_review_actions
+from backend.app.services.compliance_score import compute_compliance_score
+from backend.app.services.product_category import classify_product, scope_rules
+from backend.app.services.regulation_retrieval import get_retriever
+from backend.app.services.report_generator import FIELD_LABELS
+from backend.app.services import annotate as annotate_service
+from backend.app.services import legal
 from backend.app.services import ocr_service
 
-# Frozen response schema version (see tests/test_schema_freeze.py)
-RESPONSE_SCHEMA = "labelguard-inspection/1.0"
+# Frozen response schema version (see tests/test_schema_freeze.py).
+#
+# 1.0 -> 1.1 (additive only, no key removed or retyped): adds
+#   compliance_score, product_category, regulation_citations,
+#   annotated_images, disclaimer.
+# A 1.0 consumer keeps working - every 1.0 key is still present with the
+# same meaning.
+RESPONSE_SCHEMA = "labelguard-inspection/1.1"
 
 FIELD_NAMES = [
     "mrp",
     "product_name",
+    "brand",
     "net_quantity",
     "manufacturer",
     "packer",
@@ -37,8 +50,16 @@ class InspectionPipeline:
     """Full inspection flow: quality gate -> OCR -> field extraction -> rules ->
     confidence fusion -> decision."""
 
-    def __init__(self, rules_path: Optional[str] = None, engine: str = "labelguard"):
+    def __init__(
+        self,
+        rules_path: Optional[str] = None,
+        engine: str = "labelguard",
+        evidence_dir: str = "reports/inspections/evidence",
+        annotate: bool = True,
+    ):
         self.quality_gate = ImageQualityGate()
+        self.evidence_dir = evidence_dir
+        self.annotate = annotate
         self.field_extractor = FieldExtractor()
         if engine == "legacy":
             self.rule_engine = RuleEngine(rules_path=rules_path)
@@ -228,14 +249,20 @@ class InspectionPipeline:
                 "usability_basis": "quality_gate" if gate_usable else "none",
                 "quality": quality,
                 "ocr": None,
+                "ocr_error": None,
                 "fields": {},
             }
             # Always run OCR: readable evidence must never be wasted just
             # because a synthetic blur metric disagreed with reality.
             try:
                 ocr_result = self.ocr(path)
-            except Exception:
+            except Exception as exc:
+                # An engine that cannot run is a deployment fault, not an
+                # unreadable photograph. Keep the distinction: telling an
+                # inspector to recapture a perfectly good pack because
+                # PaddleOCR is missing wastes their time and hides the bug.
                 ocr_result = None
+                entry["ocr_error"] = f"{type(exc).__name__}: {exc}"[:300]
             if ocr_result and ocr_result["texts"]:
                 entry["ocr"] = ocr_result
                 ocr_readable = (
@@ -287,6 +314,7 @@ class InspectionPipeline:
                         e["ocr"]["avg_confidence"] if e["ocr"] else None
                     ),
                     "num_lines": len(e["ocr"]["texts"]) if e["ocr"] else 0,
+                    "ocr_error": e["ocr_error"],
                 }
                 for e in per_image
             ],
@@ -307,25 +335,67 @@ class InspectionPipeline:
             "decision_downgraded_from": None,
             "decision_emoji": None,
             "review_actions": [],
+            "compliance_score": None,
+            "product_category": None,
+            "regulation_citations": [],
+            "annotated_images": [],
+            "disclaimer": {
+                "system_role": legal.SYSTEM_ROLE,
+                "text": legal.DISCLAIMER,
+                "short": legal.SHORT_DISCLAIMER,
+            },
             "processing_time_sec": None,
         }
 
+        ocr_errors = [e for e in per_image if e["ocr_error"]]
+
         usable = [e for e in per_image if e["usable"]]
         if not usable:
+            if len(ocr_errors) == n:
+                # Every surface failed for the same reason: the engine.
+                reasons = [
+                    "The OCR engine could not run, so no text could be read from "
+                    "any surface. This is a system fault, not an image problem - "
+                    "recapturing the package will not help.",
+                    f"Error on '{ocr_errors[0]['name']}': {ocr_errors[0]['ocr_error']}",
+                ]
+            else:
+                reasons = [
+                    "No usable image of the package - compliance cannot be "
+                    "assessed automatically"
+                ]
+                if ocr_errors:
+                    reasons.append(
+                        f"{len(ocr_errors)} surface(s) also failed OCR with a "
+                        f"system error: {ocr_errors[0]['ocr_error']}"
+                    )
             result["decision"] = "MANUAL_REVIEW"
-            result["decision_reasons"] = [
-                "No usable image of the package - compliance cannot be assessed automatically"
-            ]
+            result["decision_reasons"] = reasons
             result["decision_emoji"] = DECISION_EMOJI["MANUAL_REVIEW"]
             result["processing_time_sec"] = round(time.time() - started, 2)
             return result
 
         merged_ocr = self._merged_ocr(usable)
         if not merged_ocr["texts"]:
-            result["decision"] = "MANUAL_REVIEW"
-            result["decision_reasons"] = [
+            reasons = [
                 "No text detected on any captured surface - cannot assess compliance"
             ]
+            if len(ocr_errors) == n:
+                reasons = [
+                    "The OCR engine could not run, so no text could be read "
+                    "from any surface. This is a system fault, not an image "
+                    "problem - recapturing the package will not help.",
+                    f"Error on '{ocr_errors[0]['name']}': "
+                    f"{ocr_errors[0]['ocr_error']}",
+                ]
+            elif ocr_errors:
+                reasons.append(
+                    "The OCR engine failed on "
+                    f"{len(ocr_errors)} of {n} surface(s) - this is a system "
+                    f"fault, not an image problem: {ocr_errors[0]['ocr_error']}"
+                )
+            result["decision"] = "MANUAL_REVIEW"
+            result["decision_reasons"] = reasons
             result["decision_emoji"] = DECISION_EMOJI["MANUAL_REVIEW"]
             result["processing_time_sec"] = round(time.time() - started, 2)
             return result
@@ -370,6 +440,54 @@ class InspectionPipeline:
             result["images"],
             confidence.overall,
         )
+
+        # Compliance score (PRD 26): 0-100 with a per-category breakdown
+        result["compliance_score"] = compute_compliance_score(result["rule_results"])
+
+        # Commodity classification (PRD 23): advisory scoping only - it never
+        # changes a rule verdict
+        category = classify_product(
+            merged_fields, merged_ocr.get("texts"), product_name
+        )
+        category["rule_scope"] = scope_rules(
+            result["rule_results"], category["category"]
+        )
+        result["product_category"] = category
+
+        # Regulation citations (PRD 8): every FAIL/MANUAL_REVIEW finding is
+        # traced back to document + rule + page + verbatim quote
+        try:
+            result["regulation_citations"] = get_retriever().cite_findings(
+                result["rule_results"]
+            )
+        except Exception as exc:  # retrieval must never fail an inspection
+            result["regulation_citations"] = [
+                {
+                    "rule_id": None,
+                    "status": "MANUAL_REVIEW",
+                    "retrieval": "error",
+                    "citations": [],
+                    "note": (
+                        f"Regulation retrieval unavailable ({exc}) - manual "
+                        "verification required"
+                    ),
+                }
+            ]
+
+        # Visual evidence (PRD 20): highlighted regions on the actual photos
+        if self.annotate:
+            try:
+                result["annotated_images"] = annotate_service.annotate_images(
+                    image_paths,
+                    names,
+                    merged_fields,
+                    result["rule_results"],
+                    output_dir=self.evidence_dir,
+                    field_labels=FIELD_LABELS,
+                    inspection_id=inspection_id,
+                )
+            except Exception:
+                result["annotated_images"] = []
 
         result["processing_time_sec"] = round(time.time() - started, 2)
         return result

@@ -345,3 +345,92 @@ class TestFieldExtractor:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestEntityIsNotACommodityName:
+    """A company name is not the commodity, and an address is not a brand.
+
+    Seen on a real inspection of test_packages/demo_snack, whose back label
+    carries the manufacturer on one line and its address on the next:
+
+        product_name  "ABC Foods Pvt. Ltd."
+        brand         "Mumbai, Maharashtra, India"
+
+    Both are prominent, neither carries a declaration label, so the
+    largest-block heuristics took them.
+    """
+
+    BACK_LABEL = [
+        "ABC Foods Pvt. Ltd.",
+        "Mumbai, Maharashtra, India",
+        "Mfg Date: 15/01/2026",
+        "Batch No: A25X77",
+        "Consumer Care: 1800-123-4567",
+    ]
+
+    def _extract(self, texts):
+        from backend.app.services.field_extraction import FieldExtractor
+
+        bboxes = [
+            [[20, i * 60], [400, i * 60], [400, i * 60 + 44], [20, i * 60 + 44]]
+            for i in range(len(texts))
+        ]
+        return FieldExtractor().extract_all(texts, [0.95] * len(texts), bboxes)
+
+    def test_a_company_name_is_not_the_product_name(self):
+        fields = self._extract(self.BACK_LABEL)
+        assert fields["product_name"].value != "ABC Foods Pvt. Ltd."
+
+    def test_an_address_line_is_not_the_brand(self):
+        fields = self._extract(self.BACK_LABEL)
+        assert fields["brand"].value != "Mumbai, Maharashtra, India"
+
+    def test_the_company_is_still_read_as_the_manufacturer(self):
+        """Rejecting it as a product name must not lose it entirely."""
+        fields = self._extract(["Manufactured By: ABC Foods Pvt. Ltd."] + self.BACK_LABEL[1:])
+        assert fields["manufacturer"].value
+        assert "ABC Foods" in fields["manufacturer"].value
+
+    def test_missing_commodity_name_is_reported_not_invented(self):
+        """Rule 6(1)(b) makes an absent common name a finding - filling it in
+        from the letterhead would hide the violation."""
+        fields = self._extract(self.BACK_LABEL)
+        name = fields["product_name"]
+        if name.value is None:
+            assert name.confidence_level == "MISSING"
+        else:
+            # whatever it picked, it must not be an entity or an address
+            assert "pvt" not in name.value.lower()
+            assert "ltd" not in name.value.lower()
+
+    @pytest.mark.parametrize(
+        "entity",
+        [
+            "ABC Foods Pvt. Ltd.",
+            "Sunrise Industries Limited",
+            "Global Snacks LLP",
+            "Acme Corporation",
+        ],
+    )
+    def test_legal_entity_suffixes_are_rejected_as_product_names(self, entity):
+        fields = self._extract([entity, "Some Prominent Words"])
+        assert fields["product_name"].value != entity
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "Mumbai, Maharashtra, India",
+            "Pune 411001, Maharashtra",
+            "Nagpur, India",
+        ],
+    )
+    def test_place_names_are_rejected_as_brands(self, address):
+        fields = self._extract([address, "Mfg Date: 01/2026"])
+        assert fields["brand"].value != address
+
+    def test_a_real_commodity_name_still_wins(self):
+        """The guards must not suppress a genuine product name."""
+        fields = self._extract(
+            ["ABC Foods Pvt. Ltd.", "Crispy Potato Wafers", "Net Qty: 100 g"]
+        )
+        assert fields["product_name"].value == "Crispy Potato Wafers"

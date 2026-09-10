@@ -37,7 +37,13 @@ class FieldExtractor:
         
         # Extract each field
         results['mrp'] = self._extract_mrp(ocr_texts, ocr_confidences, bboxes)
-        results['product_name'] = self._extract_product_name(ocr_texts, ocr_confidences, bboxes)
+        # Brand first: an explicitly labelled or trademarked brand line is not
+        # the generic commodity name, so it is excluded from that search.
+        brand = self._extract_brand(ocr_texts, ocr_confidences, bboxes)
+        results['product_name'] = self._extract_product_name(
+            ocr_texts, ocr_confidences, bboxes,
+            exclude_idx=brand.line_index if brand.confidence_level == 'HIGH' else -1,
+        )
         results['net_quantity'] = self._extract_net_quantity(ocr_texts, ocr_confidences, bboxes)
         results['manufacturer'] = self._extract_entity(ocr_texts, ocr_confidences, bboxes, 'manufacturer')
         results['packer'] = self._extract_entity(ocr_texts, ocr_confidences, bboxes, 'packer')
@@ -48,6 +54,14 @@ class FieldExtractor:
         results['batch_number'] = self._extract_batch(ocr_texts, ocr_confidences, bboxes)
         results['consumer_care'] = self._extract_consumer_care(ocr_texts, ocr_confidences, bboxes)
         results['country_of_origin'] = self._extract_country_of_origin(ocr_texts, ocr_confidences, bboxes)
+        results['brand'] = (
+            brand
+            if brand.confidence_level == 'HIGH'
+            else self._extract_brand(
+                ocr_texts, ocr_confidences, bboxes,
+                exclude_idx=results['product_name'].line_index,
+            )
+        )
         
         return results
     
@@ -240,7 +254,8 @@ class FieldExtractor:
         )
     
     def _extract_product_name(self, texts: List[str], confidences: List[float],
-                              bboxes: List[List[List[int]]]) -> ExtractedField:
+                              bboxes: List[List[List[int]]],
+                              exclude_idx: int = -1) -> ExtractedField:
         """Extract the common/generic name of the commodity (Rule 6(1)(b)).
 
         Heuristic: the most prominent text block on the surface (largest
@@ -252,6 +267,7 @@ class FieldExtractor:
             r'm\.?r\.?p|retail\s*price|unit\s*sale|taxes|incl\b|usp\b'
             r'|net\s*(wt|weight|qty|quant)'
             r'|mfg|mfd|manufactur|facture|packed|marketed|mkt\.?\s*by|batch|lot\b'
+            r'|\bbrand\b'
             r'|best\s*before|use\s*by|useby|exp|licen|lic\.?\s*no|fssa'
             r'|ingredient|nutrition|energy|protein|fat\b|carbohydrate|sodium'
             r'|calcium|vitamin|sugar|cholesterol|serving|kcal|per\s*100'
@@ -273,6 +289,8 @@ class FieldExtractor:
 
         best_idx, best_score = None, 0.0
         for i, text in enumerate(texts):
+            if i == exclude_idx:
+                continue  # already claimed as the brand
             t = text.strip()
             if len(t) < 3 or len(t) > 40 or confidences[i] < 0.80:
                 continue
@@ -280,6 +298,10 @@ class FieldExtractor:
                 # parenthesised fragments like 'LETTER (S) OF THE' are not names
                 continue
             if skip_pattern.search(t):
+                continue
+            # A company name is the manufacturer/packer, never the commodity's
+            # common name - Rule 6(1)(b) asks what the thing *is*.
+            if self.ENTITY_SUFFIX_RE.search(t):
                 continue
             if alpha_ratio(t) < 0.6:
                 continue
@@ -638,6 +660,9 @@ class FieldExtractor:
             r'\b(\d{1,2}[A-Za-z]{3}\d{2,4})\b',
             r'\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b',
             r'\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-]*\d{2,4})\b',
+            # Month/year only - the form Rule 6(1)(d) actually requires.
+            # Tried last so a full dd/mm/yyyy is never truncated to mm/yyyy.
+            r'\b(\d{1,2}[/\-.]\d{4})\b',
         ]
         
         address_keywords = ['road', 'street', 'area', 'industrial', 'gidc', 'india', 'pin', 'dist', 'district', 'po:', 'p.o.']
@@ -1070,4 +1095,181 @@ class FieldExtractor:
             bbox=[],
             reason="No country of origin found",
             line_index=-1
+        )
+
+    # ------------------------------------------------------------------
+    # Brand name (Rule 6(1)(b) - the brand/trade name printed on the label,
+    # distinct from the generic commodity name)
+    # ------------------------------------------------------------------
+
+    BRAND_LABEL_RE = re.compile(
+        r'\b(?:brand(?:\s*name)?|marketed\s*(?:by|under)|a\s+brand\s+of)\b\s*[:\-]?\s*(.*)',
+        re.IGNORECASE,
+    )
+    # OCR renders trademark marks as the glyph or as an ASCII fallback
+    TRADEMARK_RE = re.compile(r'[\u2122\u00ae\u00a9]|\((?i:tm|r|c)\)|(?<=[A-Za-z])\s?TM\b')
+
+    # A brand is a proper noun, not a declaration, address or nutrition row.
+    BRAND_SKIP_RE = re.compile(
+        r'm\.?r\.?p|retail\s*price|unit\s*sale|taxes|incl\b'
+        r'|net\s*(wt|weight|qty|quant)'
+        r'|mfg|mfd|manufactur|facture|packed|pkd|batch|lot\b'
+        r'|best\s*before|use\s*by|useby|\bexp\b|licen|lic\.?\s*no|fssa'
+        r'|ingredient|nutrition|energy|protein|fat\b|carbohydrate|sodium'
+        r'|calcium|vitamin|sugar|cholesterol|serving|kcal|per\s*100'
+        r'|consumer|customer|helpline|toll|call\s*us|contact|email|phone'
+        r'|feedback|address|pin\b|road|street|plot\b|estate|industrial'
+        r'|product\s*of|made\s*in|country\s*of\s*origin'
+        # place names: an address line is not a brand
+        r'|maharashtra|gujarat|haryana|karnataka|tamil|kerala|andhra|telangana'
+        r'|bengal|rajasthan|punjab|pradesh|bihar|odisha|assam|delhi|mumbai'
+        r'|chennai|kolkata|hyderabad|bangalore|bengaluru|ahmedabad|surat'
+        r'|jaipur|lucknow|indore|nagpur|gurugram|\bindia\b'
+        r'|store\b|keep\b|warning|contains|allergen|see\s+(the\s+)?(base|neck|first)'
+        r'|base\s*of\s*can|qr\s*code|bar\s*code|www|\.com|@',
+        re.IGNORECASE,
+    )
+    # Legal-entity suffixes mark a manufacturer/packer line, not a brand mark
+    ENTITY_SUFFIX_RE = re.compile(
+        r'\b(pvt|private|ltd|limited|llp|inc|corp|corporation|co\.?|company|'
+        r'industries|enterprises|foods?\s+pvt|&\s*sons)\b',
+        re.IGNORECASE,
+    )
+
+    def _extract_brand(self, texts: List[str], confidences: List[float],
+                       bboxes: List[List[List[int]]],
+                       exclude_idx: int = -1) -> ExtractedField:
+        """Extract the brand / trade name.
+
+        Priority:
+          1. An explicit ``Brand:`` label (same line, then next line).
+          2. A trademark-marked word (``ACME(TM)``).
+          3. The most prominent proper-noun block that is NOT the block already
+             claimed as the generic commodity name.
+
+        Returning None is correct when the label carries only a generic name -
+        a brand is not a mandatory declaration under LM(PC)R 2011, so an
+        absent brand must never be invented.
+        """
+
+        def clean(value: str) -> str:
+            value = self.TRADEMARK_RE.sub('', value).strip()
+            return value.strip(' :-–—.,')
+
+        # 1. Explicit label
+        for i, text in enumerate(texts):
+            match = self.BRAND_LABEL_RE.search(text or '')
+            if not match:
+                continue
+            value = clean(match.group(1))
+            if not value and i + 1 < len(texts):
+                value = clean(texts[i + 1])
+                if value and 2 <= len(value) <= 40:
+                    return ExtractedField(
+                        field_name='brand',
+                        value=value,
+                        ocr_text=f"{texts[i]} | {texts[i + 1]}",
+                        ocr_confidence=min(confidences[i], confidences[i + 1]),
+                        extraction_confidence=min(
+                            min(confidences[i], confidences[i + 1]), 0.90
+                        ),
+                        confidence_level='HIGH',
+                        bbox=bboxes[i + 1] if bboxes[i + 1] else bboxes[i],
+                        reason="Brand label with value on the following line",
+                        line_index=i + 1,
+                    )
+                continue
+            if value and 2 <= len(value) <= 40:
+                return ExtractedField(
+                    field_name='brand',
+                    value=value,
+                    ocr_text=texts[i],
+                    ocr_confidence=confidences[i],
+                    extraction_confidence=min(confidences[i], 0.92),
+                    confidence_level='HIGH',
+                    bbox=bboxes[i],
+                    reason="Explicit brand label on the package",
+                    line_index=i,
+                )
+
+        # 2. Trademark marker
+        for i, text in enumerate(texts):
+            t = (text or '').strip()
+            if not self.TRADEMARK_RE.search(t):
+                continue
+            value = clean(t)
+            if not (2 <= len(value) <= 40) or self.BRAND_SKIP_RE.search(value):
+                continue
+            return ExtractedField(
+                field_name='brand',
+                value=value,
+                ocr_text=text,
+                ocr_confidence=confidences[i],
+                extraction_confidence=min(confidences[i], 0.88),
+                confidence_level='HIGH',
+                bbox=bboxes[i],
+                reason="Trademark symbol marks this text as the brand name",
+                line_index=i,
+            )
+
+        # 3. Prominent proper-noun block distinct from the commodity name
+        best_idx, best_score = None, 0.0
+        for i, text in enumerate(texts):
+            if i == exclude_idx:
+                continue
+            t = (text or '').strip()
+            if not (2 <= len(t) <= 30) or confidences[i] < 0.85:
+                continue
+            if self.BRAND_SKIP_RE.search(t) or self.ENTITY_SUFFIX_RE.search(t):
+                continue
+            if self._is_reject(t):
+                continue
+            words = t.split()
+            if len(words) > 3:
+                continue
+            letters = sum(c.isalpha() for c in t)
+            if letters / max(1, len(t.replace(' ', ''))) < 0.8:
+                continue
+            # brands are printed as capitals or Title Case
+            if not (t.isupper() or t == t.title()):
+                continue
+            if not bboxes[i]:
+                continue
+            try:
+                ys = [p[1] for p in bboxes[i]]
+                xs = [p[0] for p in bboxes[i]]
+                area = max(1, max(ys) - min(ys)) * max(1, max(xs) - min(xs))
+            except Exception:
+                continue
+            score = area * float(confidences[i])
+            if score > best_score:
+                best_score, best_idx = score, i
+
+        if best_idx is not None:
+            return ExtractedField(
+                field_name='brand',
+                value=texts[best_idx].strip(),
+                ocr_text=texts[best_idx],
+                ocr_confidence=confidences[best_idx],
+                # inferred, not labelled - capped so it can never auto-PASS a rule
+                extraction_confidence=min(confidences[best_idx], 0.62),
+                confidence_level='LOW',
+                bbox=bboxes[best_idx],
+                reason=(
+                    "Prominent proper-noun text distinct from the commodity "
+                    "name - inferred brand, not an explicit declaration"
+                ),
+                line_index=best_idx,
+            )
+
+        return ExtractedField(
+            field_name='brand',
+            value=None,
+            ocr_text='',
+            ocr_confidence=0.0,
+            extraction_confidence=0.0,
+            confidence_level='MISSING',
+            bbox=[],
+            reason="No brand or trade name found on the captured surfaces",
+            line_index=-1,
         )

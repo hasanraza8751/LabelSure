@@ -42,6 +42,7 @@ QTY_VALUE_RE = re.compile(
 )
 MONTH_YEAR_RES = [
     re.compile(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}"),
+    re.compile(r"\d{1,2}[/\-.]\d{4}"),  # month/year - Rule 6(1)(d)'s own form
     re.compile(r"\d{1,2}[A-Za-z]{3}\d{2,4}"),
     re.compile(r"\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}"),
     re.compile(r"[A-Za-z]{3,9}\s*[\-]?\s*\d{2,4}"),

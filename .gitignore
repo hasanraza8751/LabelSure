@@ -17,6 +17,7 @@ venv/
 env/
 .env
 .venv/
+.venv312/
 ENV/
 
 # IDE
@@ -66,3 +67,19 @@ logs/
 
 # Ignore specific files in ocr_test_results
 ocr_test_results/*.json
+
+# Generated inspection artifacts (reproducible from the pipeline)
+reports/inspections/*.md
+reports/inspections/*.pdf
+reports/inspections/evidence/
+
+# Local development and demo databases
+inspections.db
+demo_inspections.db
+*.db-journal
+
+# Agent tooling that is machine-local. The skills themselves live in
+# .agents/skills and are committed; .claude/skills is only absolute symlinks
+# into it, which would not resolve on another machine.
+.claude/skills/
+.reticle/

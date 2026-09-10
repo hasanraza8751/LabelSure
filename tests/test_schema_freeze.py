@@ -1,8 +1,20 @@
-"""Schema freeze: the /inspect response contract is `labelguard-inspection/1.0`.
+"""Schema freeze: the /inspect response contract is `labelguard-inspection/1.1`.
 
 These tests pin the exact top-level keys of the response and the exact keys
 of every review action. Any intentional schema change requires bumping
 RESPONSE_SCHEMA and updating this test deliberately.
+
+Version history
+---------------
+1.0  Original frozen contract.
+1.1  Additive only - no 1.0 key removed, renamed or retyped, so every 1.0
+     consumer keeps working. Adds:
+       compliance_score      PRD 26 - 0-100 score + per-category breakdown
+       product_category      PRD 23 - commodity classification (advisory)
+       regulation_citations  PRD 8  - document/rule/page/quote per finding
+       annotated_images      PRD 20 - highlighted evidence overlays
+       disclaimer            PRD 35 - "AI-assisted compliance screening"
+     test_v1_0_keys_still_present below is the backward-compatibility guard.
 """
 
 import sys
@@ -14,6 +26,37 @@ import pytest
 from backend.app.services.pipeline import InspectionPipeline, RESPONSE_SCHEMA
 
 FROZEN_TOP_LEVEL_KEYS = {
+    "inspection_id",
+    "response_schema",
+    "timestamp",
+    "product_name",
+    "ruleset",
+    "images",
+    "coverage",
+    "extracted_fields",
+    "reference_pointers",
+    "unclaimed_evidence",
+    "evidence_pool_size",
+    "cylindrical_package",
+    "rule_results",
+    "compliance_decision",
+    "confidence",
+    "decision",
+    "decision_reasons",
+    "decision_downgraded_from",
+    "decision_emoji",
+    "review_actions",
+    "compliance_score",
+    "product_category",
+    "regulation_citations",
+    "annotated_images",
+    "disclaimer",
+    "processing_time_sec",
+}
+
+# The 1.0 contract. Every one of these keys must survive every future bump -
+# removing one is a breaking change, not an addition.
+V1_0_KEYS = {
     "inspection_id",
     "response_schema",
     "timestamp",
@@ -53,7 +96,7 @@ FROZEN_REVIEW_ACTION_KEYS = {
 
 
 def _mock_pipeline():
-    pipeline = InspectionPipeline()
+    pipeline = InspectionPipeline(annotate=False)
 
     front_texts = ["DEMO SNACK", "MRP: Rs. 20.00", "Net Qty: 100 g"]
     back_texts = [
@@ -90,7 +133,15 @@ class TestSchemaFreeze:
 
     def test_response_schema_version(self):
         assert self.result["response_schema"] == RESPONSE_SCHEMA
-        assert RESPONSE_SCHEMA == "labelguard-inspection/1.0"
+        assert RESPONSE_SCHEMA == "labelguard-inspection/1.1"
+
+    def test_v1_0_keys_still_present(self):
+        """Backward compatibility: a 1.0 consumer must still find every key."""
+        missing = V1_0_KEYS - set(self.result.keys())
+        assert not missing, f"1.1 dropped 1.0 keys: {sorted(missing)}"
+
+    def test_additions_are_the_only_difference(self):
+        assert V1_0_KEYS <= FROZEN_TOP_LEVEL_KEYS
 
     def test_top_level_keys_frozen(self):
         assert set(self.result.keys()) == FROZEN_TOP_LEVEL_KEYS, (
@@ -100,7 +151,7 @@ class TestSchemaFreeze:
 
     def test_every_key_present_in_early_return_paths(self):
         """Early-return paths (no usable image) must expose the same schema."""
-        pipeline = InspectionPipeline()
+        pipeline = InspectionPipeline(annotate=False)
         pipeline.assess_quality = lambda path: {"usable": False, "score": 30.0, "checks": {}}
         pipeline.ocr = lambda path: {
             "texts": [], "confidences": [], "bounding_boxes": [], "avg_confidence": 0.0

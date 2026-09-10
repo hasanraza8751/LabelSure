@@ -1,6 +1,8 @@
 import os
 from typing import Dict, Any, List, Optional
 
+from backend.app.services import legal
+
 STATUS_ICONS = {
     "PASS": "✅ PASS",
     "FAIL": "❌ FAIL",
@@ -20,6 +22,7 @@ RULE_STATUS_ICONS = {
 FIELD_LABELS = {
     "mrp": "MRP",
     "product_name": "Product Name",
+    "brand": "Brand",
     "net_quantity": "Net Quantity",
     "manufacturer": "Manufacturer",
     "packer": "Packer",
@@ -42,9 +45,15 @@ class ReportGenerator:
 
     # ------------------------------------------------------------------
 
-    def generate(self, result: Dict[str, Any]) -> str:
+    def generate(
+        self,
+        result: Dict[str, Any],
+        inspector_decision: Optional[Dict[str, Any]] = None,
+    ) -> str:
         lines: List[str] = []
         lines.append("# Compliance Inspection Report")
+        lines.append("")
+        lines.append(legal.disclaimer_block())
         lines.append("")
         lines.append(
             f"**Inspection ID:** `{result.get('inspection_id', 'n/a')}`  "
@@ -52,6 +61,12 @@ class ReportGenerator:
         lines.append(f"**Date:** {result.get('timestamp', 'n/a')}  ")
         product = result.get("product_name") or "Unknown"
         lines.append(f"**Product:** {product}  ")
+        category = result.get("product_category") or {}
+        if category:
+            lines.append(
+                f"**Commodity type:** {category.get('label', 'Unknown')} "
+                f"(confidence {category.get('confidence', 0):.0%})  "
+            )
         ruleset = result.get("ruleset", {})
         lines.append(f"**Ruleset:** {ruleset.get('id', '?')} v{ruleset.get('version', '?')}")
         if not ruleset.get("verified", False):
@@ -89,6 +104,37 @@ class ReportGenerator:
             lines.append("")
             for reason in reasons:
                 lines.append(f"- {reason}")
+            lines.append("")
+
+        # Compliance score (PRD 26)
+        score_block = result.get("compliance_score") or {}
+        if score_block.get("score") is not None:
+            lines.append("## Compliance Score")
+            lines.append("")
+            lines.append(
+                f"### {score_block['score']:.0f} / 100 "
+                f"(grade {score_block.get('grade', '-')})"
+            )
+            lines.append("")
+            lines.append(score_block.get("grade_meaning", ""))
+            lines.append("")
+            lines.append("| Category | Score | Pass | Fail | Review | Not assessable |")
+            lines.append("|---|---|---|---|---|---|")
+            for c in score_block.get("categories", []):
+                score_cell = (
+                    f"{c['score']:.0f}/100" if c.get("score") is not None else "-"
+                )
+                lines.append(
+                    f"| {c['label']} | {score_cell} | {c['pass']} | {c['fail']} "
+                    f"| {c['manual_review']} | {c['not_assessable']} |"
+                )
+            lines.append("")
+            lines.append(f"*{score_block.get('basis', '')}*")
+            lines.append("")
+            lines.append(
+                "> This score is a screening aid. It does not replace statutory "
+                "inspection and carries no legal finding."
+            )
             lines.append("")
 
         # Extracted information
@@ -256,6 +302,131 @@ class ReportGenerator:
             )
         lines.append("")
 
+        # Visual evidence overlays (PRD 20)
+        annotated = result.get("annotated_images") or []
+        if annotated:
+            lines.append("## Visual Evidence")
+            lines.append("")
+            lines.append(
+                "Each captured surface below has the OCR region of every "
+                "extracted declaration highlighted, colour-coded by the verdict "
+                "of the rules that use it."
+            )
+            lines.append("")
+            for entry in annotated:
+                lines.append(f"### {entry.get('name', 'surface')}")
+                lines.append("")
+                lines.append(f"![Annotated {entry.get('name')}]({entry.get('path')})")
+                lines.append("")
+                lines.append("| Field | Value | Rule verdict |")
+                lines.append("|---|---|---|")
+                for box in entry.get("boxes", []):
+                    lines.append(
+                        f"| {box.get('label')} | `{box.get('value')}` "
+                        f"| {box.get('status', '').replace('_', ' ')} |"
+                    )
+                lines.append("")
+
+        # Regulatory citations (PRD 8)
+        citations = result.get("regulation_citations") or []
+        if citations:
+            lines.append("## Regulatory Sources")
+            lines.append("")
+            lines.append(
+                "Every finding that needs action is traced to the regulation it "
+                "rests on - document, rule, page and the verbatim clause text."
+            )
+            lines.append("")
+            for entry in citations:
+                lines.append(
+                    f"### {entry.get('rule_id', '?')} - {entry.get('status', '?')}"
+                )
+                lines.append("")
+                if entry.get("note"):
+                    lines.append(f"> {entry['note']}")
+                    lines.append("")
+                for citation in entry.get("citations", []):
+                    page = f", p.{citation['page']}" if citation.get("page") else ""
+                    lines.append(
+                        f"**{citation.get('document', '?')}** - "
+                        f"{citation.get('rule', '?')}{page}  "
+                    )
+                    if citation.get("effective_date"):
+                        lines.append(
+                            f"*Effective date:* {citation['effective_date']}  "
+                        )
+                    quote = str(citation.get("quote", "")).strip()
+                    if quote:
+                        if len(quote) > 400:
+                            quote = quote[:397] + "..."
+                        lines.append(f"> \"{quote}\"")
+                    lines.append("")
+
+        # Commodity scoping (PRD 23)
+        category = result.get("product_category") or {}
+        scope = category.get("rule_scope") or {}
+        if scope.get("out_of_scope"):
+            lines.append("## Commodity Scoping")
+            lines.append("")
+            lines.append(
+                f"Classified as **{category.get('label', 'Unknown')}** from: "
+                + ", ".join(f"`{e}`" for e in category.get("evidence", [])[:5])
+            )
+            lines.append("")
+            lines.append(
+                f"{len(scope['out_of_scope'])} conditional rule(s) concern other "
+                "commodity types. They were still evaluated and their verdicts "
+                "stand as reported - this list only tells the inspector which "
+                "physical checks are unlikely to be relevant."
+            )
+            lines.append("")
+            for entry in scope["out_of_scope"]:
+                lines.append(f"- `{entry['rule_id']}` - {entry['reason']}")
+            lines.append("")
+
+        # Manual verification & inspector sign-off (PRD 21)
+        lines.append("## Manual Verification & Inspector Sign-off")
+        lines.append("")
+        lines.append(legal.MANUAL_VERIFICATION_NOTE)
+        lines.append("")
+        if inspector_decision:
+            lines.append("| | |")
+            lines.append("|---|---|")
+            lines.append(
+                f"| Inspector | {inspector_decision.get('inspector_name') or inspector_decision.get('inspector_id', '')} |"
+            )
+            lines.append(f"| Inspector ID | `{inspector_decision.get('inspector_id', '')}` |")
+            lines.append(f"| Decision | **{inspector_decision.get('action', '')}** |")
+            lines.append(
+                f"| AI decision | {(inspector_decision.get('ai_decision') or '-').replace('_', ' ')} |"
+            )
+            lines.append(
+                f"| Final verdict | **{(inspector_decision.get('final_decision') or '-').replace('_', ' ')}** |"
+            )
+            lines.append(f"| Reason | {inspector_decision.get('reason', '')} |")
+            lines.append(f"| Recorded at | {inspector_decision.get('timestamp', '')} |")
+            if inspector_decision.get("notes"):
+                lines.append(f"| Notes | {inspector_decision['notes']} |")
+            lines.append("")
+        else:
+            lines.append(
+                "**No inspector decision recorded.** This report describes an "
+                "automated screening result only. It becomes an inspection record "
+                "when an authorised inspector accepts or overrides the finding "
+                "below."
+            )
+            lines.append("")
+            lines.append("| Field | Entry |")
+            lines.append("|---|---|")
+            lines.append("| Inspector name | |")
+            lines.append("| Inspector ID | |")
+            lines.append("| Accept / Override | |")
+            lines.append("| Final verdict | |")
+            lines.append("| Reason | |")
+            lines.append("| Signature | |")
+            lines.append("| Date | |")
+            lines.append("")
+
         conf = result.get("confidence")
         if conf:
             lines.append("## Confidence Breakdown")
@@ -271,19 +442,32 @@ class ReportGenerator:
             lines.append("")
 
         lines.append("---")
+        lines.append("")
+        lines.append(legal.disclaimer_block())
+        lines.append("")
         lines.append(
-            f"*Generated by AI Legal Metrology Compliance Scanner — "
-            f"processing time {result.get('processing_time_sec', '?')}s*"
+            f"*Generated by AI Legal Metrology Compliance Scanner - "
+            f"processing time {result.get('processing_time_sec', '?')}s - "
+            f"schema {result.get('response_schema', '?')}*"
         )
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
 
-    def save(self, result: Dict[str, Any], markdown: Optional[str] = None) -> str:
+    def save(
+        self,
+        result: Dict[str, Any],
+        markdown: Optional[str] = None,
+        inspector_decision: Optional[Dict[str, Any]] = None,
+    ) -> str:
         os.makedirs(self.output_dir, exist_ok=True)
-        md = markdown if markdown is not None else self.generate(result)
+        md = (
+            markdown
+            if markdown is not None
+            else self.generate(result, inspector_decision=inspector_decision)
+        )
         filename = f"{result.get('inspection_id', 'inspection')}.md"
         path = os.path.join(self.output_dir, filename)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(md)
         return path
