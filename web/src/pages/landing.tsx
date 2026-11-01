@@ -6,6 +6,7 @@ import {
   Camera,
   FileSearch,
   Gavel,
+  Landmark,
   LineChart,
   MessageSquareQuote,
   ScanLine,
@@ -83,75 +84,87 @@ export function LandingPage() {
 
   return (
     <div className="flex flex-col">
-      <section className="border-b">
-        <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-6 px-4 py-16 md:py-24">
-          <Badge variant="outline" className="gap-1.5">
-            <ScanLine className="size-3.5" />
-            LM(PC)R 2011 · 31 declarations
-          </Badge>
+      {/* ------------------------------------------------ 1. Hero */}
+      <section className="border-b border-border/70 bg-linear-to-b from-muted/40 via-card to-background">
+        <div className="mx-auto flex w-full max-w-7xl flex-col items-start gap-6 px-4 py-16 sm:px-6 md:py-24">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/8 text-primary font-semibold text-xs">
+              <ScanLine className="size-3.5" />
+              LM(PC)R 2011 · 31 Declarations Evaluated
+            </Badge>
+            <Badge variant="secondary" className="gap-1.5 text-xs font-medium">
+              <Landmark className="size-3 text-muted-foreground" />
+              Smart India Hackathon 2026
+            </Badge>
+          </div>
 
-          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-balance md:text-6xl">
+          <h1 className="max-w-4xl text-4xl font-bold tracking-tight text-foreground sm:text-5xl lg:text-6xl text-balance">
             Screen packaged-commodity labels against the Legal Metrology rules.
           </h1>
 
-          <p className="text-muted-foreground max-w-2xl text-lg text-pretty">
+          <p className="text-muted-foreground max-w-2xl text-base sm:text-lg leading-relaxed text-pretty">
             Photograph a package. LabelSure reads the declarations, applies the
             packaged-commodities rules clause by clause, and hands an inspector a
-            verdict with its evidence, its confidence and the regulation it cites.
+            verdict with its evidence, its confidence and the verbatim regulation it cites.
           </p>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Button asChild size="lg">
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <Button asChild size="lg" className="bg-primary text-primary-foreground font-semibold px-6 shadow-sm gap-2">
               <Link to="/inspect">
-                Inspect a package
-                <ArrowRight />
+                Open Inspection Workspace
+                <ArrowRight className="size-4" />
               </Link>
             </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link to="/ask">Ask the rules a question</Link>
+            <Button asChild size="lg" variant="outline" className="bg-card font-medium">
+              <Link to="/ask">Ask the Rules a Question</Link>
             </Button>
           </div>
 
-          <p className="text-muted-foreground text-sm">{SHORT_DISCLAIMER}</p>
+          <p className="text-muted-foreground text-xs">{SHORT_DISCLAIMER}</p>
         </div>
       </section>
 
-      <section className="border-b">
-        <div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-px px-4 py-10 md:grid-cols-4">
-          <Stat label="Rules evaluated" value="31" />
-          <Stat label="Regulation chunks indexed" value={corpus ? String(corpus.chunks) : "—"} />
+      {/* ------------------------------------------------ 2. Stats Bar */}
+      <section className="border-b border-border/70 bg-card">
+        <div className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-4 px-4 py-8 sm:px-6 md:grid-cols-4">
+          <Stat label="Statutory rules evaluated" value="31" />
+          <Stat label="Gazette chunks indexed" value={corpus ? String(corpus.chunks) : "—"} />
           <Stat
-            label="Source documents"
+            label="Source legal documents"
             value={corpus ? String(corpus.documents.length) : "—"}
           />
-          <Stat label="Surfaces per package" value="up to 6" />
+          <Stat label="Surfaces per package" value="Up to 6" />
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-4 py-16">
-        <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
-          How an inspection runs
-        </h2>
-        <p className="text-muted-foreground mt-2 max-w-2xl">
-          Four stages, each of which can stop and say it does not know. A stage that
-          cannot do its job reports that rather than passing a guess downstream.
-        </p>
+      {/* ------------------------------------------------ 3. How an inspection runs */}
+      <section className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6">
+        <div className="flex flex-col gap-2 max-w-3xl">
+          <span className="text-xs font-bold uppercase tracking-wider text-primary">Inspection Architecture</span>
+          <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            How an inspection runs
+          </h2>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            Four deterministic stages, each of which can stop and say it does not know. A stage that
+            cannot verify a condition reports that rather than passing a guess downstream.
+          </p>
+        </div>
 
-        <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {PIPELINE.map((step, index) => (
-            <Card key={step.title} className="h-full">
-              <CardHeader>
-                <div className="bg-primary/10 text-primary flex size-9 items-center justify-center rounded-md">
+            <Card key={step.title} className="h-full border-l-3 border-l-primary/60 border-border/80 shadow-2xs">
+              <CardHeader className="pb-3">
+                <div className="bg-primary/10 text-primary flex size-9 items-center justify-center rounded-lg shadow-2xs">
                   <step.Icon className="size-4.5" />
                 </div>
-                <CardTitle className="mt-3 flex items-center gap-2">
-                  <span className="text-muted-foreground text-xs tabular-nums">
+                <CardTitle className="mt-3 flex items-center gap-2 text-base font-bold text-foreground">
+                  <span className="text-primary font-mono text-xs">
                     0{index + 1}
                   </span>
                   {step.title}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="text-muted-foreground text-sm">
+              <CardContent className="text-muted-foreground text-xs leading-relaxed">
                 {step.body}
               </CardContent>
             </Card>
@@ -161,54 +174,62 @@ export function LandingPage() {
 
       <Separator />
 
-      <section className="mx-auto w-full max-w-6xl px-4 py-16">
-        <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
-          What it will not do
-        </h2>
-        <p className="text-muted-foreground mt-2 max-w-2xl">
-          The constraints matter more than the features. This is a screening aid for a
-          statutory process, so its limits are part of the product.
-        </p>
+      {/* ------------------------------------------------ 4. System Boundaries */}
+      <section className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6">
+        <div className="flex flex-col gap-2 max-w-3xl">
+          <span className="text-xs font-bold uppercase tracking-wider text-primary">Statutory Integrity</span>
+          <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            What the system deliberately will not do
+          </h2>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            The statutory constraints matter more than the features. This is an AI-assisted screening
+            decision-support system for legal metrology officers, so its limits are essential to its legal integrity.
+          </p>
+        </div>
 
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           {FEATURES.map((feature) => (
-            <Card key={feature.title}>
+            <Card key={feature.title} className="border-border/80 shadow-2xs">
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <feature.Icon className="text-primary size-5" />
-                  <CardTitle>{feature.title}</CardTitle>
+                  <div className="flex size-8 items-center justify-center rounded bg-primary/10 text-primary">
+                    <feature.Icon className="size-4.5" />
+                  </div>
+                  <CardTitle className="text-base font-bold text-foreground">{feature.title}</CardTitle>
                 </div>
-                <CardDescription className="pt-1">{feature.body}</CardDescription>
+                <CardDescription className="pt-2 text-xs leading-relaxed text-muted-foreground">
+                  {feature.body}
+                </CardDescription>
               </CardHeader>
             </Card>
           ))}
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-4 pb-16">
-        <Card>
+      {/* ------------------------------------------------ 5. Quick CTA */}
+      <section className="mx-auto w-full max-w-7xl px-4 pb-16 sm:px-6">
+        <Card className="border-border/80 shadow-xs bg-muted/20">
           <CardHeader>
-            <CardTitle>Start with one package</CardTitle>
-            <CardDescription>
-              Upload the front and back of a wrapper. The result is a per-rule table,
-              annotated photographs and a signed-off report you can export as PDF.
+            <CardTitle className="text-xl font-bold text-foreground">Start screening a package</CardTitle>
+            <CardDescription className="text-xs leading-relaxed">
+              Upload photographs of a product container or wrapper. The system evaluates declarations, displays highlighted visual evidence, and prepares a signed-off report for export.
             </CardDescription>
           </CardHeader>
           <CardFooter className="flex flex-wrap gap-3">
-            <Button asChild>
+            <Button asChild className="bg-primary text-primary-foreground font-semibold">
               <Link to="/inspect">
-                Open the inspector
-                <ArrowRight />
+                Open Inspection Workspace
+                <ArrowRight className="size-4 ml-1.5" />
               </Link>
             </Button>
-            <Button asChild variant="outline">
-              <Link to="/regulations">Browse the regulation corpus</Link>
+            <Button asChild variant="outline" className="bg-card">
+              <Link to="/regulations">Browse Statutory Regulation Corpus</Link>
             </Button>
           </CardFooter>
         </Card>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-4 pb-16">
+      <section className="mx-auto w-full max-w-7xl px-4 pb-16 sm:px-6">
         <Disclaimer />
       </section>
     </div>
@@ -217,9 +238,9 @@ export function LandingPage() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col gap-1 px-2 py-4">
-      <span className="text-3xl font-semibold tabular-nums">{value}</span>
-      <span className="text-muted-foreground text-sm">{label}</span>
+    <div className="flex flex-col gap-1 p-3 rounded-lg border border-border/70 bg-muted/20">
+      <span className="text-3xl font-bold tabular-nums text-foreground">{value}</span>
+      <span className="text-muted-foreground text-xs font-medium">{label}</span>
     </div>
   )
 }

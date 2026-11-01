@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Check, Gavel, Mail, X, AlertTriangle, BookOpen, Send } from "lucide-react"
+import { Check, Gavel, BookOpen } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -32,18 +32,8 @@ import { ToggleGroupField } from "@/components/toggle-group-field"
 import { api, ApiError, token } from "@/lib/api"
 import type { Inspection, RuleResult } from "@/lib/types"
 
-const STATUS_OPTIONS = [
-  { value: "PASS", label: "Pass", icon: Check },
-  { value: "FAIL", label: "Fail", icon: X },
-  { value: "MANUAL_REVIEW", label: "Review", icon: AlertTriangle },
-]
-
-const AI_STATUS_ICON: Record<string, string> = {
-  PASS: "✅",
-  FAIL: "❌",
-  MANUAL_REVIEW: "⚠️",
-  NOT_APPLICABLE: "—",
-}
+import { RuleReviewRow } from "@/components/report/rule-review-row"
+import { EmailReportCard } from "@/components/report/email-report-card"
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -192,7 +182,7 @@ export function SignOffCard({ inspection }: { inspection: Inspection }) {
       if (
         emailTo.trim() &&
         effectiveFinal === "COMPLIANT" &&
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTo.trim())
+        EMAIL_RE.test(emailTo.trim())
       ) {
         try {
           const emailed = await api.emailReport(inspection.inspection_id, {
@@ -448,187 +438,6 @@ export function SignOffCard({ inspection }: { inspection: Inspection }) {
           </CardFooter>
         </form>
       </Card>
-    </div>
-  )
-}
-
-/**
- * Post-sign-off email panel. Only appears once the inspector has marked the
- * package compliant - the backend refuses to send anything before that.
- */
-function EmailReportCard({ inspection }: { inspection: Inspection }) {
-  const [to, setTo] = useState("")
-  const [note, setNote] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [configured, setConfigured] = useState<boolean | null>(null)
-  const [sent, setSent] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .mailStatus()
-      .then((s) => setConfigured(s.configured))
-      .catch(() => setConfigured(false))
-  }, [])
-
-  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim())
-
-  async function send() {
-    setBusy(true)
-    try {
-      const response = await api.emailReport(inspection.inspection_id, {
-        to: to.trim(),
-        note: note.trim() || undefined,
-      })
-      setSent(response.message)
-      toast.success(response.message)
-    } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "Could not send the email")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Mail className="size-5" />
-          Email the report
-        </CardTitle>
-        <CardDescription>
-          The signed-off PDF report can be sent to a recipient - a supervisor's
-          office, the trader, or the file record.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {sent ? (
-          <p className="flex items-center gap-2 text-sm">
-            <Send className="text-emerald-600 size-4" />
-            {sent}
-          </p>
-        ) : configured === false ? (
-          <p className="text-muted-foreground text-sm">
-            Email delivery is not configured on this server (SMTP_HOST /
-            SMTP_USER / SMTP_PASSWORD).
-          </p>
-        ) : (
-          <FieldGroup>
-            <Field data-invalid={to.trim() && !valid ? true : undefined}>
-              <FieldLabel htmlFor="email-to">Recipient</FieldLabel>
-              <Input
-                id="email-to"
-                type="email"
-                placeholder="officer@example.gov.in"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-              />
-              <FieldDescription>
-                Sends the PDF report with the recorded sign-off attached.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="email-note">Note (optional)</FieldLabel>
-              <Input
-                id="email-note"
-                placeholder="Added to the email body"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            </Field>
-          </FieldGroup>
-        )}
-      </CardContent>
-      {!sent && (
-        <CardFooter>
-          <Button onClick={send} disabled={busy || !valid || configured === false}>
-            {busy ? <Spinner data-icon /> : <Send />}
-            Send report
-          </Button>
-        </CardFooter>
-      )}
-    </Card>
-  )
-}
-
-function RuleReviewRow({
-  rule,
-  inspectorStatus,
-  inspectorNote,
-  onStatusChange,
-  onNoteChange,
-}: {
-  rule: RuleResult
-  inspectorStatus: string
-  inspectorNote: string
-  onStatusChange: (status: string) => void
-  onNoteChange: (note: string) => void
-}) {
-  const aiStatus = rule.status || "NOT_APPLICABLE"
-  const changed = inspectorStatus && inspectorStatus !== aiStatus
-
-  return (
-    <div
-      className={`flex flex-col gap-2 rounded-lg border p-3 ${
-        changed ? "border-amber-300 bg-amber-50/50 dark:bg-amber-950/20" : ""
-      }`}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold">
-              {rule.source?.rule || rule.rule_id}
-            </span>
-            <span className="text-muted-foreground text-xs">
-              AI: {AI_STATUS_ICON[aiStatus] || aiStatus} {aiStatus}
-            </span>
-          </div>
-          <p className="text-sm">{rule.requirement}</p>
-          {rule.reason && <p className="text-muted-foreground text-xs">{rule.reason}</p>}
-          {rule.source?.evidence_text && (
-            <p className="text-muted-foreground border-l-2 pl-2 text-xs italic">
-              “{rule.source.evidence_text}”
-              {rule.source.page ? ` — page ${rule.source.page}` : ""}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {STATUS_OPTIONS.map((opt) => {
-            const Icon = opt.icon
-            const active = inspectorStatus === opt.value
-            const aiActive = aiStatus === opt.value
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => onStatusChange(active ? "" : opt.value)}
-                className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                  active
-                    ? opt.value === "PASS"
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                      : opt.value === "FAIL"
-                        ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                    : aiActive
-                      ? "bg-muted text-muted-foreground"
-                      : "bg-background text-muted-foreground/60 hover:bg-accent"
-                }`}
-                title={opt.label}
-              >
-                <Icon className="size-3" />
-                {opt.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-      {changed && (
-        <Input
-          placeholder="Why are you overriding this rule?"
-          value={inspectorNote}
-          onChange={(e) => onNoteChange(e.target.value)}
-          className="h-8 text-xs"
-        />
-      )}
     </div>
   )
 }

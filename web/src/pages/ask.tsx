@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react"
-import { BookOpen, CircleSlash, Send, Sparkles } from "lucide-react"
+import { BookOpen, CircleSlash, HelpCircle, Scale, Send, ShieldCheck, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 
 import { Disclaimer } from "@/components/disclaimer"
+import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Accordion,
@@ -33,7 +34,7 @@ import type { ChatTurn, RagAnswer } from "@/lib/types"
 const EXAMPLES = [
   "What must be declared as the retail sale price on a pre-packaged commodity?",
   "How should the month and year of manufacture be shown?",
-  "What are the minimum height requirements for the declarations?",
+  "What are the minimum font height requirements for declarations?",
   "Which packages are exempt from the packaged commodities rules?",
 ]
 
@@ -54,8 +55,6 @@ export function AskPage() {
     if (!query || busy) return
     setBusy(true)
     setQuestion("")
-    // Send the exchange so far, so a follow-up like "and for imports?" has
-    // something to refer back to. Only completed turns count.
     const history: ChatTurn[] = turns.flatMap((turn) =>
       turn.answer
         ? [
@@ -85,63 +84,70 @@ export function AskPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-8">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Ask the rules</h1>
-        <p className="text-muted-foreground">
-          Ask about the packaged commodities rules and the answer comes from the
-          indexed corpus, with the clauses that support it. Ordinary questions
-          about this tool are answered too. When the corpus does not cover
-          something, the assistant says so instead of composing
-          statutory-sounding prose.
-        </p>
-      </header>
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-4 py-8 sm:px-6">
+      <PageHeader
+        title="Ask the Rules"
+        description="Official Legal Metrology regulatory inquiry tool. Queries are grounded directly in the indexed statutory corpus with citations to Gazette rules. Unsubstantiated claims are rejected by design."
+        badge={{
+          label: "Gazette Grounded",
+          icon: <Scale className="size-3.5 text-primary" />,
+        }}
+      />
 
       {turns.length === 0 && (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Sparkles />
-            </EmptyMedia>
-            <EmptyTitle>Ask about packaged-commodity labelling</EmptyTitle>
-            <EmptyDescription>
-              Or just say hello. Try one of these to start.
-            </EmptyDescription>
-          </EmptyHeader>
-          <div className="flex flex-col gap-2">
-            {EXAMPLES.map((example) => (
-              <Button
-                key={example}
-                variant="outline"
-                size="sm"
-                className="h-auto py-2 text-left whitespace-normal"
-                onClick={() => ask(example)}
-              >
-                {example}
-              </Button>
-            ))}
-          </div>
-        </Empty>
+        <Card className="border-border/80 shadow-xs">
+          <CardContent className="py-8">
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Sparkles className="size-7 text-primary" />
+                </EmptyMedia>
+                <EmptyTitle className="text-base font-bold">Inquire about Legal Metrology declarations</EmptyTitle>
+                <EmptyDescription className="text-xs max-w-md">
+                  Ask about mandatory packaging declarations, exemptions, or verification procedures.
+                </EmptyDescription>
+              </EmptyHeader>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 max-w-2xl w-full">
+                {EXAMPLES.map((example) => (
+                  <Button
+                    key={example}
+                    variant="outline"
+                    size="sm"
+                    className="h-auto p-3 text-left text-xs font-medium whitespace-normal bg-card hover:bg-muted/60 border-border/80 justify-start"
+                    onClick={() => ask(example)}
+                  >
+                    <HelpCircle className="size-3.5 text-primary shrink-0 mr-1.5" />
+                    <span>{example}</span>
+                  </Button>
+                ))}
+              </div>
+            </Empty>
+          </CardContent>
+        </Card>
       )}
 
+      {/* Conversation Turns */}
       <div className="flex flex-col gap-6">
         {turns.map((turn, index) => (
           <div key={index} className="flex flex-col gap-3">
-            <div className="bg-muted ml-auto max-w-[85%] rounded-lg px-4 py-2.5 text-sm">
+            {/* User Question */}
+            <div className="ml-auto max-w-[85%] rounded-xl bg-foreground text-background px-4 py-3 text-sm font-medium shadow-2xs">
               {turn.question}
             </div>
+
+            {/* Error or Response */}
             {turn.error ? (
               <Alert variant="destructive">
-                <AlertTitle>Could not answer</AlertTitle>
-                <AlertDescription>{turn.error}</AlertDescription>
+                <AlertTitle>Inquiry could not be completed</AlertTitle>
+                <AlertDescription className="text-xs">{turn.error}</AlertDescription>
               </Alert>
             ) : turn.answer ? (
               <AnswerCard answer={turn.answer} />
             ) : (
-              <Card>
-                <CardContent className="text-muted-foreground flex items-center gap-3 py-6 text-sm">
+              <Card className="border-border/80 shadow-xs">
+                <CardContent className="text-muted-foreground flex items-center gap-3 py-6 text-xs font-medium">
                   <Spinner />
-                  Searching the regulation corpus…
+                  Searching the official Legal Metrology regulation corpus…
                 </CardContent>
               </Card>
             )}
@@ -150,10 +156,11 @@ export function AskPage() {
         <div ref={endRef} />
       </div>
 
-      <div className="bg-background sticky bottom-4">
-        <InputGroup>
+      {/* Input Box */}
+      <div className="bg-background/95 sticky bottom-4 z-20 backdrop-blur-md pt-2">
+        <InputGroup className="bg-card shadow-sm border-border/80 rounded-xl overflow-hidden">
           <InputGroupTextarea
-            placeholder="Ask about a declaration, an exemption, or how this tool works…"
+            placeholder="Ask about a declaration rule, minimum font height, exemption clause..."
             value={question}
             rows={2}
             onChange={(e) => setQuestion(e.target.value)}
@@ -163,18 +170,19 @@ export function AskPage() {
                 ask(question)
               }
             }}
+            className="text-sm p-3 placeholder:text-muted-foreground/70"
           />
-          <InputGroupAddon align="block-end">
-            <span className="text-muted-foreground text-xs">
-              Enter to send, Shift+Enter for a new line
+          <InputGroupAddon align="block-end" className="bg-muted/20 border-t p-2">
+            <span className="text-muted-foreground text-[11px]">
+              Press Enter to send inquiry
             </span>
             <InputGroupButton
-              className="ml-auto"
+              className="ml-auto bg-primary text-primary-foreground font-semibold px-4 text-xs gap-1.5"
               disabled={busy || !question.trim()}
               onClick={() => ask(question)}
             >
-              {busy ? <Spinner data-icon /> : <Send />}
-              Ask
+              {busy ? <Spinner data-icon /> : <Send className="size-3.5" />}
+              Inquire
             </InputGroupButton>
           </InputGroupAddon>
         </InputGroup>
@@ -186,14 +194,11 @@ export function AskPage() {
 }
 
 function AnswerCard({ answer }: { answer: RagAnswer }) {
-  // A greeting, or a question about this tool, is not a failed lookup. Showing
-  // it in the refusal card would tell the reader the corpus was searched and
-  // came up short, which is not what happened.
   if (answer.intent !== "regulation") {
     return (
-      <Card>
-        <CardContent className="flex gap-3 py-5 text-sm leading-relaxed whitespace-pre-wrap">
-          <Sparkles className="text-primary mt-0.5 size-4 shrink-0" />
+      <Card className="border-border/80 shadow-xs">
+        <CardContent className="flex gap-3.5 p-5 text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+          <ShieldCheck className="text-primary mt-0.5 size-5 shrink-0" />
           <span>{answer.answer}</span>
         </CardContent>
       </Card>
@@ -202,18 +207,20 @@ function AnswerCard({ answer }: { answer: RagAnswer }) {
 
   if (!answer.grounded) {
     return (
-      <Card className="border-amber-600/30">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CircleSlash className="text-amber-600" />
-            Not answered
+      <Card className="border-amber-500/40 bg-amber-500/5 shadow-xs">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-amber-800 dark:text-amber-300 text-sm font-bold">
+            <CircleSlash className="size-4.5 text-amber-600" />
+            Unsubstantiated In Corpus
           </CardTitle>
-          <CardDescription>{answer.answer}</CardDescription>
+          <CardDescription className="text-xs text-amber-900/80 dark:text-amber-300/80">
+            {answer.answer}
+          </CardDescription>
         </CardHeader>
         {answer.sources.length > 0 && (
-          <CardContent>
-            <p className="text-muted-foreground mb-3 text-sm">
-              The closest clauses retrieved, for you to judge yourself:
+          <CardContent className="pt-2">
+            <p className="text-muted-foreground mb-2 text-xs font-semibold">
+              Closest retrieved statutory clauses for officer review:
             </p>
             <SourceList sources={answer.sources} />
           </CardContent>
@@ -223,25 +230,33 @@ function AnswerCard({ answer }: { answer: RagAnswer }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center gap-2">
-          <CardTitle>Answer</CardTitle>
-          <Badge variant="secondary">
-            {Math.round(answer.confidence * 100)}% retrieval confidence
-          </Badge>
-          <Badge variant="outline">
-            {answer.generator === "groq" ? "language model" : "verbatim extract"}
-          </Badge>
-          {answer.reranked && <Badge variant="outline">reranked</Badge>}
+    <Card className="border-border/80 shadow-xs">
+      <CardHeader className="pb-3 border-b bg-muted/10">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-4 text-emerald-600" />
+            <CardTitle className="text-sm font-bold text-foreground">
+              Statutory Finding
+            </CardTitle>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="secondary" className="text-xs font-semibold">
+              {Math.round(answer.confidence * 100)}% Retrieval Confidence
+            </Badge>
+            <Badge variant="outline" className="text-xs">
+              {answer.generator === "groq" ? "Synthesized with Citations" : "Verbatim Extract"}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col gap-5">
-        <div className="text-sm leading-relaxed whitespace-pre-wrap">{answer.answer}</div>
+      <CardContent className="p-5 flex flex-col gap-5">
+        <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground font-sans">
+          {answer.answer}
+        </div>
         <div>
-          <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
-            <BookOpen className="size-4" />
-            Sources ({answer.sources.length})
+          <h3 className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <BookOpen className="size-3.5 text-primary" />
+            Supporting Legal Gazette Clauses ({answer.sources.length})
           </h3>
           <SourceList sources={answer.sources} />
         </div>
@@ -252,45 +267,32 @@ function AnswerCard({ answer }: { answer: RagAnswer }) {
 
 function SourceList({ sources }: { sources: RagAnswer["sources"] }) {
   return (
-    <Accordion type="multiple">
+    <Accordion type="multiple" className="w-full">
       {sources.map((source) => (
-        <AccordionItem key={source.chunk_id} value={source.chunk_id}>
-          <AccordionTrigger>
-            <span className="flex flex-wrap items-center gap-2 text-left">
-              <span className="font-mono text-xs">{source.metadata.rule}</span>
-              <span>{source.metadata.title}</span>
-              <Badge variant="secondary" className="tabular-nums">
-                {source.score.toFixed(2)}
+        <AccordionItem key={source.chunk_id} value={source.chunk_id} className="border-border/60">
+          <AccordionTrigger className="py-2.5 hover:no-underline">
+            <span className="flex flex-wrap items-center gap-2 text-left text-xs font-semibold">
+              <Badge variant="outline" className="font-mono text-[11px] text-primary bg-primary/5">
+                {source.metadata.rule}
               </Badge>
+              <span className="text-foreground">{source.metadata.title}</span>
+              <span className="text-muted-foreground tabular-nums text-[11px] ml-auto">
+                Score: {source.score.toFixed(2)}
+              </span>
             </span>
           </AccordionTrigger>
-          <AccordionContent className="flex flex-col gap-3">
-            <blockquote className="border-l-2 pl-3 text-sm">{source.content}</blockquote>
-            <p className="text-muted-foreground text-xs">
+          <AccordionContent className="flex flex-col gap-2.5 pt-1 pb-3">
+            <blockquote className="border-l-3 border-primary/40 bg-muted/30 p-3 rounded-r text-xs leading-relaxed text-foreground font-serif">
+              &ldquo;{source.content}&rdquo;
+            </blockquote>
+            <p className="text-muted-foreground text-[11px]">
               {source.metadata.document}
-              {source.metadata.page ? ` · page ${source.metadata.page}` : ""}
-              {source.metadata.verified ? " · verified against the source document" : ""}
+              {source.metadata.page ? ` · Page ${source.metadata.page}` : ""}
+              {source.metadata.verified ? " · Verified Gazette Reference" : ""}
             </p>
-            <dl className="text-muted-foreground grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
-              <ScoreRow label="Keyword" value={source.scores.keyword} />
-              <ScoreRow label="Vector" value={source.scores.vector} />
-              <ScoreRow label="Hybrid" value={source.scores.hybrid} />
-              <ScoreRow label="Rank fusion" value={source.scores.rrf} />
-            </dl>
           </AccordionContent>
         </AccordionItem>
       ))}
     </Accordion>
-  )
-}
-
-function ScoreRow({ label, value }: { label: string; value: number | null | undefined }) {
-  return (
-    <div className="flex justify-between gap-2">
-      <dt>{label}</dt>
-      <dd className="tabular-nums">
-        {typeof value === "number" ? value.toFixed(3) : "—"}
-      </dd>
-    </div>
   )
 }

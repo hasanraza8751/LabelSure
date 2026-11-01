@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
-import { BookOpen, ExternalLink, Search, X } from "lucide-react"
+import { BookOpen, ExternalLink, FileText, Landmark, Search, X } from "lucide-react"
 import { toast } from "sonner"
 
+import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -92,56 +93,67 @@ export function RegulationsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-8">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Regulation corpus</h1>
-        <p className="text-muted-foreground">
-          Keyword and lexical-vector search over the indexed clauses, or open a
-          document to read it through. Results are the statutory text itself, never
-          a paraphrase.
-        </p>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-8 sm:px-6">
+      <PageHeader
+        title="Statutory Regulation Corpus"
+        description="Official Legal Metrology (Packaged Commodities) Rules, 2011 and statutory Gazette notifications. Search indexed clauses by keyword or inspect official documents in source order."
+        badge={{
+          label: "Official Repository",
+          icon: <Landmark className="size-3.5 text-primary" />,
+        }}
+      >
         {stats && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Badge variant="secondary">{stats.chunks} clauses</Badge>
-            <Badge variant="outline">{stats.documents.length} documents</Badge>
-            <Badge variant="outline">
-              {stats.with_page_numbers} with page references
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <Badge variant="secondary" className="text-xs font-semibold bg-primary/10 text-primary border-primary/20">
+              {stats.chunks} Gazette Clauses Indexed
+            </Badge>
+            <Badge variant="outline" className="text-xs font-medium">
+              {stats.documents.length} Source Documents
+            </Badge>
+            <Badge variant="outline" className="text-xs font-medium">
+              {stats.with_page_numbers} with Page References
             </Badge>
           </div>
         )}
-      </header>
+      </PageHeader>
 
-      <form onSubmit={search}>
-        <InputGroup>
-          <InputGroupAddon>
-            <Search />
+      <form onSubmit={search} className="flex flex-col gap-2">
+        <InputGroup className="bg-card shadow-xs border-border/80 rounded-lg">
+          <InputGroupAddon className="text-muted-foreground">
+            <Search className="size-4" />
           </InputGroupAddon>
           <InputGroupInput
-            placeholder="net quantity, retail sale price, country of origin…"
+            placeholder="Search keywords: net quantity, retail sale price, date of manufacture, consumer care..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            className="text-sm placeholder:text-muted-foreground/70"
           />
           <InputGroupAddon align="inline-end">
-            <InputGroupButton type="submit" disabled={busy || !query.trim()}>
+            <InputGroupButton
+              type="submit"
+              disabled={busy || !query.trim()}
+              className="bg-primary text-primary-foreground font-semibold px-4"
+            >
               {busy && !browsing ? <Spinner data-icon /> : null}
-              Search
+              Search Gazette
             </InputGroupButton>
           </InputGroupAddon>
         </InputGroup>
       </form>
 
       {scope && (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted-foreground">
-            {browsing ? "Reading" : "Searching within"}
+        <div className="flex flex-wrap items-center gap-2 text-xs bg-muted/40 p-2.5 rounded-md border border-border/60">
+          <span className="text-muted-foreground font-medium">
+            {browsing ? "Browsing official document:" : "Filtered within document:"}
           </span>
-          <Badge variant="secondary" className="gap-1.5">
+          <Badge variant="secondary" className="gap-1.5 font-semibold text-foreground">
+            <FileText className="size-3 text-primary" />
             {scope}
             <button
               type="button"
               onClick={clearScope}
               aria-label="Clear the document filter"
-              className="hover:text-foreground"
+              className="hover:text-destructive cursor-pointer"
             >
               <X className="size-3" />
             </button>
@@ -149,39 +161,42 @@ export function RegulationsPage() {
         </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Indexed documents</CardTitle>
-          <CardDescription>
-            Everything a citation in this system can point at. Open one to read its
-            clauses.
+      {/* Indexed Documents Directory */}
+      <Card className="border-border/80 shadow-xs">
+        <CardHeader className="pb-3 border-b">
+          <CardTitle className="text-base font-bold flex items-center gap-2">
+            <BookOpen className="size-4.5 text-primary" />
+            Indexed Statutory Documents
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Official regulations and amendment orders governing packaged commodity labelling in India.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-3">
           {documents === null ? (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 p-2">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-11 w-full" />
+                <Skeleton key={i} className="h-10 w-full rounded" />
               ))}
             </div>
           ) : (
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col divide-y divide-border/60">
               {documents.map((doc) => (
-                <li key={doc.document}>
+                <li key={doc.document} className="py-1 first:pt-0 last:pb-0">
                   <div
                     className={cn(
-                      "hover:bg-accent flex items-center gap-2 rounded-md transition-colors",
-                      scope === doc.document && "bg-accent",
+                      "flex items-center gap-2 rounded-lg p-2 transition-colors",
+                      scope === doc.document ? "bg-primary/8 border border-primary/20" : "hover:bg-muted/50",
                     )}
                   >
                     <button
                       type="button"
                       onClick={() => openDocument(doc.document)}
-                      className="flex flex-1 items-center gap-3 px-3 py-2.5 text-left text-sm"
+                      className="flex flex-1 items-center gap-3 text-left text-xs sm:text-sm font-medium text-foreground cursor-pointer"
                     >
-                      <BookOpen className="text-muted-foreground size-4 shrink-0" />
-                      <span className="flex-1">{doc.document}</span>
-                      <Badge variant="outline" className="shrink-0 tabular-nums">
+                      <BookOpen className="text-primary size-4 shrink-0" />
+                      <span className="flex-1 font-semibold">{doc.document}</span>
+                      <Badge variant="outline" className="shrink-0 tabular-nums text-xs">
                         {doc.chunks} {doc.chunks === 1 ? "clause" : "clauses"}
                       </Badge>
                     </button>
@@ -189,7 +204,7 @@ export function RegulationsPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="mr-1 size-8 shrink-0"
+                        className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
                         asChild
                       >
                         <a
@@ -197,9 +212,9 @@ export function RegulationsPage() {
                           target="_blank"
                           rel="noreferrer"
                           aria-label={`Open the source document for ${doc.document}`}
-                          title="Open the official source document"
+                          title="Open official Gazette document"
                         >
-                          <ExternalLink />
+                          <ExternalLink className="size-3.5" />
                         </a>
                       </Button>
                     )}
@@ -211,60 +226,69 @@ export function RegulationsPage() {
         </CardContent>
       </Card>
 
+      {/* Search / Browsing Results */}
       {results !== null && results.length === 0 && (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Search />
-            </EmptyMedia>
-            <EmptyTitle>Nothing retrieved</EmptyTitle>
-            <EmptyDescription>
-              {note ?? "No clause matched. Manual verification is required."}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <Card className="border-border/80 shadow-xs">
+          <CardContent className="py-10">
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Search className="size-8 text-muted-foreground" />
+                </EmptyMedia>
+                <EmptyTitle className="text-base font-semibold">No statutory clauses retrieved</EmptyTitle>
+                <EmptyDescription className="text-xs">
+                  {note ?? "No matching clause found in the indexed regulatory corpus. Manual legal verification required."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </CardContent>
+        </Card>
       )}
 
       {results?.map((hit) => (
-        <Card key={hit.chunk_id}>
-          <CardHeader>
-            <div className="flex flex-wrap items-center gap-2">
-              <CardTitle className="font-mono text-base">{hit.rule_reference}</CardTitle>
-              {/* A browsed clause was not ranked, so there is no score to show. */}
-              {typeof hit.score === "number" && (
-                <Badge variant="secondary" className="tabular-nums">
-                  {hit.score.toFixed(2)}
+        <Card key={hit.chunk_id} className="border-border/80 shadow-xs">
+          <CardHeader className="pb-3 border-b bg-muted/10">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Badge className="font-mono text-xs font-bold bg-primary text-primary-foreground">
+                  {hit.rule_reference}
                 </Badge>
+                <Badge variant="outline" className="text-xs">
+                  {hit.category}
+                </Badge>
+              </div>
+              {typeof hit.score === "number" && (
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  Relevance score: <span className="font-bold text-foreground">{hit.score.toFixed(2)}</span>
+                </span>
               )}
-              <Badge variant="outline">{hit.category}</Badge>
             </div>
-            <CardDescription>{hit.title}</CardDescription>
+            <CardTitle className="text-base font-bold text-foreground pt-1">
+              {hit.title}
+            </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <blockquote className="border-l-2 pl-3 text-sm leading-relaxed">
-              {hit.text}
+          <CardContent className="p-5 flex flex-col gap-3.5">
+            <blockquote className="border-l-3 border-primary/50 bg-muted/25 p-3.5 rounded-r text-xs leading-relaxed text-foreground font-serif">
+              &ldquo;{hit.text}&rdquo;
             </blockquote>
-            <p className="text-muted-foreground text-xs">
-              {hit.citation.document}
-              {hit.citation.page ? ` · page ${hit.citation.page}` : ""}
-              {hit.citation.effective_date ? ` · ${hit.citation.effective_date}` : ""}
-              {hit.citation.verified ? " · verified" : " · pending verification"}
-            </p>
-            {typeof hit.keyword_score === "number" &&
-              typeof hit.vector_score === "number" && (
-                <div className="text-muted-foreground flex gap-4 text-xs tabular-nums">
-                  <span>keyword {hit.keyword_score.toFixed(3)}</span>
-                  <span>vector {hit.vector_score.toFixed(3)}</span>
-                </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-foreground">{hit.citation.document}</span>
+                {hit.citation.page ? <span>· Page {hit.citation.page}</span> : null}
+                {hit.citation.effective_date ? <span>· Effective {hit.citation.effective_date}</span> : null}
+                {hit.citation.verified && (
+                  <span className="text-emerald-600 font-medium">· Verified Gazette text</span>
+                )}
+              </div>
+              {hit.citation.url && (
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs font-medium text-primary gap-1" asChild>
+                  <a href={hit.citation.url} target="_blank" rel="noreferrer">
+                    View official Gazette PDF
+                    <ExternalLink className="size-3" />
+                  </a>
+                </Button>
               )}
-            {hit.citation.url && (
-              <Button variant="link" size="sm" className="w-fit px-0" asChild>
-                <a href={hit.citation.url} target="_blank" rel="noreferrer">
-                  Open the source document
-                  <ExternalLink />
-                </a>
-              </Button>
-            )}
+            </div>
           </CardContent>
         </Card>
       ))}

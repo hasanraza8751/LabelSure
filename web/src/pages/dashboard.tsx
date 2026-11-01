@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
   Activity,
+  AlertTriangle,
+  ArrowRight,
   ClipboardCheck,
+  Clock,
   Eye,
   FileSearch,
   Lock,
@@ -14,6 +17,7 @@ import {
 
 import { DecisionBadge, FinalDecisionBadge } from "@/components/decision-badge"
 import { Disclaimer } from "@/components/disclaimer"
+import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -43,46 +47,52 @@ import type {
   ViolationRow,
 } from "@/lib/types"
 
-/**
- * The inspector's work dashboard.
- *
- * Ordered by attention, not by interest: the status cards at the top jump the
- * queue to the screenings that need a human decision first; proven/failed
- * packages and the analytics sit below. Data comes from the existing
- * /stats and /inspections/search endpoints - no backend changes.
- */
-
 type QueueFilter = "PENDING" | "COMPLIANT" | "NON_COMPLIANT" | "MANUAL_REVIEW"
 
 const FILTERS: {
   key: QueueFilter
   label: string
   count: (s: Stats) => number
+  icon: typeof Clock
   accent: string
+  border: string
+  bg: string
 }[] = [
   {
     key: "PENDING",
     label: "To Inspect",
     count: (s) => s.by_inspector_status?.PENDING ?? 0,
-    accent: "text-orange-500",
+    icon: Clock,
+    accent: "text-amber-600",
+    border: "border-l-amber-500",
+    bg: "bg-amber-500/5",
   },
   {
     key: "COMPLIANT",
     label: "Compliant",
     count: (s) => s.compliant,
-    accent: "text-emerald-500",
+    icon: ShieldCheck,
+    accent: "text-emerald-600",
+    border: "border-l-emerald-500",
+    bg: "bg-emerald-500/5",
   },
   {
     key: "NON_COMPLIANT",
     label: "Non-Compliant",
     count: (s) => s.non_compliant,
-    accent: "text-red-500",
+    icon: ShieldAlert,
+    accent: "text-red-600",
+    border: "border-l-red-500",
+    bg: "bg-red-500/5",
   },
   {
     key: "MANUAL_REVIEW",
     label: "Manual Review",
     count: (s) => s.manual_review,
-    accent: "text-amber-500",
+    icon: AlertTriangle,
+    accent: "text-amber-600",
+    border: "border-l-amber-500",
+    bg: "bg-amber-500/5",
   },
 ]
 
@@ -136,28 +146,38 @@ export function DashboardPage() {
   const gated = error?.status === 401 || error?.status === 403
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">
-          What needs your attention, what has passed or failed, and why.
-        </p>
-      </header>
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6">
+      <PageHeader
+        title="Inspection Dashboard"
+        description="Repository screening statistics, inspector queue, and statutory violation analytics across packaged commodities."
+        badge={{
+          label: "Statutory Oversight",
+          icon: <ShieldCheck className="size-3.5 text-primary" />,
+        }}
+        actions={
+          <Button asChild size="sm" className="gap-1.5 font-semibold bg-primary text-primary-foreground shadow-xs">
+            <Link to="/inspect">
+              New Inspection
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </Button>
+        }
+      />
 
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full" />
+            <Skeleton key={i} className="h-24 w-full rounded-xl" />
           ))}
-          <Skeleton className="h-64 w-full lg:col-span-5" />
+          <Skeleton className="h-64 w-full lg:col-span-5 rounded-xl" />
         </div>
       ) : error ? (
         <Alert variant={gated ? "default" : "destructive"}>
-          {gated ? <Lock /> : null}
-          <AlertTitle>
+          {gated ? <Lock className="size-4" /> : null}
+          <AlertTitle className="font-semibold">
             {gated ? "Supervisor access required" : "Could not load the dashboard"}
           </AlertTitle>
-          <AlertDescription>
+          <AlertDescription className="text-xs">
             {gated
               ? "Repository statistics are restricted to supervisor and administrator roles. Sign in from the header."
               : error.message}
@@ -165,8 +185,8 @@ export function DashboardPage() {
         </Alert>
       ) : stats ? (
         <>
-          {/* ------------------------------------------------ 1. status overview */}
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          {/* ------------------------------------------------ 1. Status Overview Cards */}
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
             {FILTERS.map((f) => (
               <button
                 key={f.key}
@@ -174,32 +194,32 @@ export function DashboardPage() {
                 onClick={() => setFilter(f.key)}
                 aria-pressed={filter === f.key}
                 className={cn(
-                  "text-left ring-offset-background transition-shadow focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                  "text-left ring-offset-background transition-all focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none rounded-xl cursor-pointer",
                   filter === f.key
-                    ? "rounded-xl ring-2 ring-ring"
-                    : "rounded-xl hover:shadow-md",
+                    ? "ring-2 ring-primary shadow-xs"
+                    : "hover:shadow-xs",
                 )}
               >
                 <StatCard
-                  emoji={
-                    f.key === "PENDING"
-                      ? "🟠"
-                      : f.key === "COMPLIANT"
-                        ? "🟢"
-                        : f.key === "NON_COMPLIANT"
-                          ? "🔴"
-                          : "🟡"
-                  }
+                  icon={f.icon}
                   label={f.label}
                   value={f.count(stats)}
                   accent={f.accent}
+                  border={f.border}
+                  bg={filter === f.key ? f.bg : undefined}
                 />
               </button>
             ))}
-            <StatCard label="Total inspections" value={stats.total_inspections} />
+            <StatCard
+              icon={Activity}
+              label="Total Screened"
+              value={stats.total_inspections}
+              accent="text-primary"
+              border="border-l-primary"
+            />
           </div>
 
-          {/* --------------------------------------------- 2. inspection queue */}
+          {/* --------------------------------------------- 2. Inspection Queue Table */}
           <QueueSection
             filter={filter}
             onSelect={setFilter}
@@ -208,7 +228,7 @@ export function DashboardPage() {
             onRetry={() => loadQueue(filter)}
           />
 
-          {/* --------------------------------------------------- 5. analytics */}
+          {/* --------------------------------------------------- 3. Analytics Block */}
           <AnalyticsBlock stats={stats} violations={violations} />
         </>
       ) : null}
@@ -216,26 +236,31 @@ export function DashboardPage() {
   )
 }
 
-/** One clickable status card. Counts are live from /stats, not stale. */
 function StatCard({
   label,
   value,
-  emoji,
+  icon: Icon,
   accent,
+  border,
+  bg,
 }: {
   label: string
   value: number
-  emoji?: string
-  accent?: string
+  icon: typeof Clock
+  accent: string
+  border: string
+  bg?: string
 }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardDescription className="flex items-center gap-1.5">
-          {emoji ? <span aria-hidden>{emoji}</span> : null}
+    <Card className={cn("border-l-4 shadow-2xs border-border/80", border, bg)}>
+      <CardHeader className="p-4.5">
+        <CardDescription className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          <Icon className={cn("size-3.5 shrink-0", accent)} />
           {label}
         </CardDescription>
-        <CardTitle className={cn("text-3xl tabular-nums", accent)}>{value}</CardTitle>
+        <CardTitle className={cn("text-3xl font-bold tabular-nums pt-1", accent)}>
+          {value}
+        </CardTitle>
       </CardHeader>
     </Card>
   )
@@ -255,16 +280,23 @@ function QueueSection({
   onRetry: () => void
 }) {
   const titles: Record<QueueFilter, string> = {
-    PENDING: "Waiting for an inspector",
-    COMPLIANT: "Compliant screenings",
-    NON_COMPLIANT: "Non-compliant screenings",
-    MANUAL_REVIEW: "Screenings flagged for manual review",
+    PENDING: "Pending Sign-off Queue",
+    COMPLIANT: "Compliant Screenings",
+    NON_COMPLIANT: "Non-Compliant Screenings",
+    MANUAL_REVIEW: "Flagged for Manual Verification",
   }
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold tracking-tight">{titles[filter]}</h2>
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+        <div className="flex flex-col">
+          <h2 className="text-lg font-bold tracking-tight text-foreground">
+            {titles[filter]}
+          </h2>
+          <span className="text-xs text-muted-foreground">
+            Screenings recorded in the statutory compliance repository.
+          </span>
+        </div>
         <div className="flex flex-wrap gap-1.5">
           {(
             [
@@ -279,10 +311,10 @@ function QueueSection({
               type="button"
               onClick={() => onSelect(key)}
               className={cn(
-                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                "rounded-md border px-3 py-1 text-xs font-semibold transition-colors cursor-pointer",
                 filter === key
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  ? "bg-primary text-primary-foreground border-primary shadow-2xs"
+                  : "bg-card text-muted-foreground hover:bg-muted hover:text-foreground border-border",
               )}
             >
               {label}
@@ -302,43 +334,43 @@ function QueueSection({
           </AlertDescription>
         </Alert>
       ) : queue === null ? (
-        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-64 w-full rounded-xl" />
       ) : queue.length === 0 ? (
-        <Card>
-          <CardContent className="py-6">
+        <Card className="border-border/80 shadow-xs">
+          <CardContent className="py-12">
             <Empty>
               <EmptyHeader>
                 <EmptyMedia variant="icon">
-                  <ClipboardCheck />
+                  <ClipboardCheck className="size-8 text-muted-foreground" />
                 </EmptyMedia>
-                <EmptyTitle>Nothing here</EmptyTitle>
-                <EmptyDescription>
+                <EmptyTitle className="text-base font-semibold">No screenings found</EmptyTitle>
+                <EmptyDescription className="text-xs">
                   {filter === "PENDING"
-                    ? "Every screening has been signed off. New inspections appear here as they come in."
-                    : "No screenings with this status yet."}
+                    ? "All screenings have been signed off. New inspections will appear here automatically."
+                    : "No records found matching this status filter."}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <CardContent>
+        <Card className="border-border/80 shadow-xs overflow-hidden">
+          <CardContent className="p-0">
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-muted/40 border-b">
                   <TableRow>
-                    <TableHead className="w-14">Photo</TableHead>
-                    <TableHead>Product</TableHead>
-                    <TableHead className="w-32">Surfaces</TableHead>
-                    <TableHead className="w-36">AI verdict</TableHead>
-                    <TableHead className="w-36">Human verdict</TableHead>
-                    <TableHead className="w-24">Confidence</TableHead>
-                    <TableHead className="w-40">Screened</TableHead>
-                    <TableHead className="w-24" />
+                    <TableHead className="w-14 font-semibold text-xs">Photo</TableHead>
+                    <TableHead className="font-semibold text-xs">Product</TableHead>
+                    <TableHead className="w-28 font-semibold text-xs">Surfaces</TableHead>
+                    <TableHead className="w-36 font-semibold text-xs">AI Verdict</TableHead>
+                    <TableHead className="w-36 font-semibold text-xs">Human Verdict</TableHead>
+                    <TableHead className="w-24 font-semibold text-xs">Confidence</TableHead>
+                    <TableHead className="w-40 font-semibold text-xs">Date Screened</TableHead>
+                    <TableHead className="w-24 font-semibold text-xs text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody className="divide-y border-b">
                   {queue.map((entry) => (
                     <QueueRow key={entry.inspection_id} entry={entry} />
                   ))}
@@ -353,7 +385,6 @@ function QueueSection({
 }
 
 function QueueRow({ entry }: { entry: InspectionSummary }) {
-  // PENDING rows get the action verb; signed-off ones are already reviewed.
   const action =
     (entry.inspector_status ?? "PENDING") === "PENDING"
       ? entry.decision === "MANUAL_REVIEW"
@@ -362,52 +393,54 @@ function QueueRow({ entry }: { entry: InspectionSummary }) {
       : "View"
 
   return (
-    <TableRow>
-      <TableCell>
+    <TableRow className="hover:bg-muted/30 transition-colors">
+      <TableCell className="py-2.5">
         <QueueThumbnail id={entry.inspection_id} name={entry.product_name} />
       </TableCell>
-      <TableCell>
+      <TableCell className="py-2.5">
         <div className="flex flex-col">
-          <span className="font-medium">{entry.product_name || "Unnamed package"}</span>
-          <span className="text-muted-foreground font-mono text-xs">
-            {entry.brand || entry.manufacturer || entry.inspection_id.slice(0, 8)}
+          <span className="font-semibold text-sm text-foreground">
+            {entry.product_name || "Unnamed package sample"}
+          </span>
+          <span className="text-muted-foreground font-mono text-[11px]">
+            {entry.brand || entry.manufacturer || entry.inspection_id.slice(0, 10)}
           </span>
         </div>
       </TableCell>
-      <TableCell className="text-sm tabular-nums">
-        {entry.surfaces_usable ?? "—"}/{entry.surfaces_total ?? "—"} images
+      <TableCell className="text-xs font-medium tabular-nums py-2.5">
+        {entry.surfaces_usable ?? "—"}/{entry.surfaces_total ?? "—"} surfaces
       </TableCell>
-      <TableCell>
+      <TableCell className="py-2.5">
         <DecisionBadge decision={entry.decision ?? null} />
       </TableCell>
-      <TableCell>
+      <TableCell className="py-2.5">
         {entry.final_decision ? (
           <FinalDecisionBadge decision={entry.final_decision} />
         ) : (
-          <Badge variant="outline" className="text-muted-foreground">
-            Awaiting sign-off
+          <Badge variant="outline" className="text-muted-foreground text-xs font-normal">
+            Awaiting review
           </Badge>
         )}
       </TableCell>
-      <TableCell className="tabular-nums">
+      <TableCell className="tabular-nums text-xs font-semibold py-2.5">
         {typeof entry.confidence === "number"
           ? `${Math.round(entry.confidence * 100)}%`
           : "—"}
       </TableCell>
-      <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
+      <TableCell className="text-muted-foreground text-xs whitespace-nowrap py-2.5">
         {entry.timestamp?.replace("T", " ").slice(0, 16) ?? "—"}
       </TableCell>
-      <TableCell>
-        <Button asChild variant="outline" size="sm">
+      <TableCell className="text-right py-2.5">
+        <Button asChild variant="outline" size="sm" className="h-8 gap-1 text-xs font-medium bg-card hover:bg-muted">
           <Link to={`/inspections/${entry.inspection_id}`}>
             {entry.inspector_status === "PENDING" ? (
               entry.decision === "MANUAL_REVIEW" ? (
-                <FileSearch />
+                <FileSearch className="size-3.5" />
               ) : (
-                <ScanSearch />
+                <ScanSearch className="size-3.5" />
               )
             ) : (
-              <Eye />
+              <Eye className="size-3.5" />
             )}
             {action}
           </Link>
@@ -417,14 +450,12 @@ function QueueRow({ entry }: { entry: InspectionSummary }) {
   )
 }
 
-/** First annotated surface as the thumbnail; falls back to an icon when the
- *  overlay image was not generated for this screening. */
 function QueueThumbnail({ id, name }: { id: string; name?: string | null }) {
   const [broken, setBroken] = useState(false)
   if (broken) {
     return (
-      <div className="bg-muted flex size-12 items-center justify-center rounded-md border">
-        <ScanSearch className="text-muted-foreground size-5" />
+      <div className="bg-muted flex size-11 items-center justify-center rounded-md border border-border/80">
+        <ScanSearch className="text-muted-foreground size-4.5" />
       </div>
     )
   }
@@ -432,7 +463,7 @@ function QueueThumbnail({ id, name }: { id: string; name?: string | null }) {
     <img
       src={api.annotatedUrl(id, 0)}
       alt={name ? `Package thumbnail for ${name}` : "Package thumbnail"}
-      className="size-12 rounded-md border object-cover"
+      className="size-11 rounded-md border border-border/80 object-cover shadow-2xs"
       onError={() => setBroken(true)}
       loading="lazy"
     />
@@ -443,98 +474,93 @@ function QueueThumbnail({ id, name }: { id: string; name?: string | null }) {
 
 function AnalyticsBlock({ stats, violations }: { stats: Stats; violations: ViolationRow[] }) {
   return (
-    <section className="flex flex-col gap-4">
-      <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-        <TrendingUp className="size-5" />
-        Analytics
-      </h2>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="Compliance rate" value={stats.compliance_rate} format="points" />
-        <Metric
-          label="Average confidence"
-          value={stats.average_confidence}
-          format="fraction"
-        />
-        <Metric
-          label="Average compliance score"
-          value={stats.average_compliance_score}
-          format="points"
-        />
-        <Metric label="Human reviewed" value={stats.human_reviewed} />
-        <Metric label="Override rate" value={stats.override_rate} format="points" />
-        <Metric label="Total inspections" value={stats.total_inspections} />
-        <Metric label="Compliant" value={stats.compliant} />
-        <Metric label="Non-compliant" value={stats.non_compliant} />
+    <section className="flex flex-col gap-5 pt-2">
+      <div className="flex items-center gap-2 border-b pb-2.5">
+        <TrendingUp className="size-5 text-primary" />
+        <h2 className="text-lg font-bold tracking-tight text-foreground">
+          Compliance Analytics & Violations
+        </h2>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ShieldAlert className="size-5" />
-            Most frequent violations
-          </CardTitle>
-          <CardDescription>
-            The rules breached most often, with the clause each one cites.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {violations.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No violations recorded yet.</p>
-          ) : (
-            <ViolationList violations={violations} />
-          )}
-        </CardContent>
-      </Card>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard label="Compliance Rate" value={stats.compliance_rate} format="points" icon={ShieldCheck} />
+        <MetricCard label="Average Confidence" value={stats.average_confidence} format="fraction" />
+        <MetricCard label="Average Score" value={stats.average_compliance_score} format="points" />
+        <MetricCard label="Human Reviewed" value={stats.human_reviewed} />
+        <MetricCard label="Override Rate" value={stats.override_rate} format="points" />
+        <MetricCard label="Total Screenings" value={stats.total_inspections} icon={Activity} />
+        <MetricCard label="Compliant" value={stats.compliant} icon={ShieldCheck} />
+        <MetricCard label="Non-Compliant" value={stats.non_compliant} icon={ShieldAlert} />
+      </div>
 
-      {stats.daily_trend?.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="size-5" />
-              Inspections per day
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Most Frequent Violations */}
+        <Card className="border-border/80 shadow-xs">
+          <CardHeader className="pb-3 border-b">
+            <CardTitle className="flex items-center gap-2 text-base font-bold">
+              <ShieldAlert className="size-4.5 text-red-600" />
+              Statutory Declaration Violations
             </CardTitle>
+            <CardDescription className="text-xs">
+              Frequent non-conformance rules identified under LM(PC)R 2011.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <BarStrip data={stats.daily_trend} />
+          <CardContent className="p-4">
+            {violations.length === 0 ? (
+              <p className="text-muted-foreground text-xs py-4 text-center">No violations recorded yet.</p>
+            ) : (
+              <div className="flex flex-col divide-y divide-border/60">
+                {violations.map((row) => (
+                  <div key={row.rule_id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <span className="font-mono text-xs font-bold text-foreground">{row.rule ?? row.rule_id}</span>
+                      <span className="text-muted-foreground text-xs truncate">{row.title ?? "—"}</span>
+                    </div>
+                    <Badge variant="secondary" className="tabular-nums text-xs font-semibold shrink-0">
+                      {row.count} incidents
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
-      )}
+
+        {/* Daily Screening Volume */}
+        {stats.daily_trend?.length > 0 && (
+          <Card className="border-border/80 shadow-xs">
+            <CardHeader className="pb-3 border-b">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <Activity className="size-4.5 text-primary" />
+                Screening Volume Trend
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Daily inspection throughput categorized by automated verdict.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4">
+              <BarStrip data={stats.daily_trend} />
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
       <Disclaimer text={stats.disclaimer} />
     </section>
   )
 }
 
-function ViolationList({ violations }: { violations: ViolationRow[] }) {
-  return (
-    <div className="flex flex-col divide-y">
-      {violations.map((row) => (
-        <div key={row.rule_id} className="flex items-baseline justify-between gap-3 py-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="font-mono text-xs">{row.rule ?? row.rule_id}</span>
-            <span className="text-muted-foreground text-sm">{row.title ?? "—"}</span>
-          </div>
-          <Badge variant="secondary" className="tabular-nums">
-            {row.count}
-          </Badge>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function Metric({
+function MetricCard({
   label,
   value,
   format,
+  icon: Icon,
 }: {
   label: string
   value: number | null
-  /** "fraction" is 0-1, "points" is already 0-100, omitted is a plain count. */
   format?: "fraction" | "points"
+  icon?: typeof Activity
 }) {
-  // Distinguish "nothing to measure yet" from a measured zero.
   const display =
     value === null || value === undefined
       ? "—"
@@ -543,31 +569,23 @@ function Metric({
         : format === "points"
           ? `${Math.round(value)}%`
           : String(value)
+
   return (
-    <Card>
-      <CardHeader>
-        <CardDescription className="flex items-center gap-1.5">
-          {label.includes("Compliance rate") || label === "Compliant" ? (
-            <ShieldCheck className="size-3.5" />
-          ) : null}
+    <Card className="border-border/80 shadow-2xs">
+      <CardHeader className="p-4">
+        <CardDescription className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          {Icon && <Icon className="size-3.5 text-primary" />}
           {label}
         </CardDescription>
-        <CardTitle className="text-2xl tabular-nums">{display}</CardTitle>
+        <CardTitle className="text-2xl font-bold tabular-nums text-foreground pt-0.5">
+          {display}
+        </CardTitle>
       </CardHeader>
     </Card>
   )
 }
 
-/**
- * Daily screening volume, stacked by outcome.
- *
- * Plain divs rather than a charting dependency: one chart of one series does
- * not justify the weight. Heights are computed in pixels against a fixed plot
- * height, because a percentage height inside an auto-height flex column
- * resolves to zero - which is exactly how this rendered as an empty box
- * before.
- */
-const PLOT_HEIGHT = 160
+const PLOT_HEIGHT = 150
 
 const SEGMENTS = [
   { key: "COMPLIANT", label: "Compliant", className: "bg-emerald-600" },
@@ -587,9 +605,9 @@ function BarStrip({ data }: { data: DailyTrendPoint[] }) {
             key={day.date}
             className="flex min-w-10 flex-1 flex-col items-center justify-end gap-1.5"
           >
-            <span className="text-xs font-medium tabular-nums">{day.total}</span>
+            <span className="text-xs font-semibold tabular-nums text-foreground">{day.total}</span>
             <div
-              className="flex w-full max-w-16 flex-col-reverse overflow-hidden rounded-sm"
+              className="flex w-full max-w-16 flex-col-reverse overflow-hidden rounded-t-sm"
               style={{ height: (day.total / max) * PLOT_HEIGHT }}
               title={`${day.date}: ${day.total} screening(s)`}
             >
@@ -606,16 +624,16 @@ function BarStrip({ data }: { data: DailyTrendPoint[] }) {
                 )
               })}
             </div>
-            <span className="text-muted-foreground text-[10px] whitespace-nowrap">
+            <span className="text-muted-foreground text-[10px] whitespace-nowrap font-mono">
               {day.date.slice(5)}
             </span>
           </div>
         ))}
       </div>
 
-      <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
+      <div className="text-muted-foreground flex flex-wrap gap-4 text-xs pt-1 border-t">
         {SEGMENTS.map((segment) => (
-          <span key={segment.key} className="flex items-center gap-1.5">
+          <span key={segment.key} className="flex items-center gap-1.5 text-xs font-medium">
             <span className={`size-2.5 rounded-sm ${segment.className}`} />
             {segment.label}
           </span>

@@ -14,7 +14,7 @@ function initialTheme(): Theme {
   } catch {
     /* blocked storage just means we follow the OS instead */
   }
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+  return "light"
 }
 
 export function ThemeToggle() {
